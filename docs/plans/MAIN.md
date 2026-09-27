@@ -1,4 +1,5 @@
 # rigcheck plan
+<!-- plan-doc-hygiene: 2026-09-27 ca2ce9d -->
 
 ## Current focus
 
@@ -7,8 +8,12 @@
 - [x] Rule catalog and architecture, approved 2026-09-27 — [v1.md](v1.md)
 - [x] M1 Scaffold: Python 3.13, uv, ruff, ty, pytest, prek hooks, CI
 - [x] M2a Core engine: model, discovery (repo, user, plugin, memory layers), parsers, engine, terminal and JSON reports, `check` command, instruction-file and `@import` rules (CM1–CM3, CM13–CM16, CM19)
-- [ ] M2b Reference rules (backticked/linked paths and npm/just/make scripts that do not exist; sota #1–2), memory rules (MM1, MM3, MM4 accepting both top-level `type` and `metadata.type`), and the budget report (≈tokens per every-turn source, skill listing vs 1% of the window, agent descriptions vs 15k) — see [v1.md](v1.md#rule-catalog-v1-ids-from-docsresearch)
-- [ ] M2b Home walk: `rigcheck check ~` takes 23 s because a non-git target walks every folder, and 204 of 219 nested CLAUDE.md hits sit under AppData, mostly pytest temp dirs. Decide what the walk skips (AppData and dot-folders, or no nested walk when the target is home) and make it finish in a few seconds. Redirecting pytest's `--basetemp` into the repo's `.tmp/` was tried and breaks the fixtures, because their copies then sit inside rigcheck's own git repo.
+M2 remainder, split by rule module (all read [v1.md](v1.md#rule-catalog-v1-ids-from-docsresearch)); each new module also edits the `rules/__init__.py` import list, so M2b and M2c wait on each other:
+
+- [ ] M2b Reference rules in `rules/references.py`: backticked or linked paths that do not exist, and npm/just/make scripts that do not exist (sota #1–2)
+- [ ] M2c Memory rules in `rules/memory.py`: MM1, MM3, MM4, accepting both top-level `type` and `metadata.type`
+- [ ] M2d Budget report in `report/`: ≈tokens per every-turn source, skill listing vs 1% of the window, agent descriptions vs 15k
+- [ ] M2e Home walk (`discover.py`): `rigcheck check ~` takes 23 s because a non-git target walks every folder, and 204 of 219 nested CLAUDE.md hits sit under AppData, mostly pytest temp dirs. Decide what the walk skips (AppData and dot-folders, or no nested walk when the target is home) and make it finish in a few seconds. Redirecting pytest's `--basetemp` into the repo's `.tmp/` was tried and breaks the fixtures, because their copies then sit inside rigcheck's own git repo.
 
 ## Next up
 
