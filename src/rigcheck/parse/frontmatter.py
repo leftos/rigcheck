@@ -103,6 +103,28 @@ def _value(first: str, lines: list[str], start: int) -> tuple[str, int]:
     return _join([_unquote(first), *lines[start:end]]), end
 
 
+def _dedent(lines: list[str]) -> list[str]:
+    indent = min((len(line) - len(line.lstrip()) for line in lines if line.strip()), default=0)
+    return [line[indent:] for line in lines]
+
+
+def _scan(block: list[str], keys: tuple[str, ...], prefix: str) -> dict[str, str]:
+    """Read ``keys`` from ``block``, whose keys sit at column 0 and are named ``prefix`` + key; nest once when prefix is empty."""
+    parents = {key.split(".", 1)[0] for key in keys if "." in key} if not prefix else set()
+    fields: dict[str, str] = {}
+    index = 0
+    while index < len(block):
+        key, colon, rest = block[index].partition(":")
+        index += 1
+        if colon and "." not in key and prefix + key in keys:
+            fields[prefix + key], index = _value(rest.strip(), block, index)
+        elif colon and key in parents and not rest.strip():
+            end = _indented_end(block, index)
+            fields.update(_scan(_dedent(block[index:end]), keys, f"{key}."))
+            index = end
+    return fields
+
+
 def read_lenient(text: str, keys: tuple[str, ...]) -> dict[str, str]:
     """Read top-level keys from a frontmatter block the way Claude Code still loads it when strict YAML rejects it.
 
@@ -111,6 +133,9 @@ def read_lenient(text: str, keys: tuple[str, ...]) -> dict[str, str]:
     joined with single spaces. A block marker (``|`` or ``>`` with an optional chomping sign and
     indent digit) or an empty value takes the indented lines alone; a quoted value that does not
     close on its line continues to the line ending in its closing quote.
+
+    A key may also be ``parent.child``, one level deep: it is read the same way from the
+    ``child:`` lines at the first indentation under a ``parent:`` line that has no value of its own.
 
     Args:
         text: The whole file content.
@@ -122,12 +147,4 @@ def read_lenient(text: str, keys: tuple[str, ...]) -> dict[str, str]:
     lines = _lines(text)
     if lines[0] != FENCE or FENCE not in lines[1:]:
         return {}
-    block = lines[1 : lines.index(FENCE, 1)]
-    fields: dict[str, str] = {}
-    index = 0
-    while index < len(block):
-        key, colon, rest = block[index].partition(":")
-        index += 1
-        if colon and key in keys:
-            fields[key], index = _value(rest.strip(), block, index)
-    return fields
+    return _scan(lines[1 : lines.index(FENCE, 1)], keys, "")

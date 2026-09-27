@@ -88,6 +88,23 @@ def is_file_like(path: Path) -> bool:
     return unc_link_target(path) is not None or path.is_file()
 
 
+def file_size(path: Path) -> int:
+    """Return a file's size in bytes, or 0 for a network-path symlink (never followed) or a file that cannot be read.
+
+    Args:
+        path: The file to measure.
+
+    Returns:
+        The size on disk in bytes.
+    """
+    if unc_link_target(path) is not None:
+        return 0
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
 def encode_project(path: Path) -> str:
     r"""Encode a project path the way Claude Code names its ``~/.claude/projects`` folder (``D:\yaat`` → ``D--yaat``)."""
     return re.sub(r"[^A-Za-z0-9-]", "-", str(path))

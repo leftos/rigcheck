@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from rigcheck.discover import MAX_BYTES
+from rigcheck.discover import MAX_BYTES, memory_dir
 from rigcheck.rules import REGISTRY
 from support import FIXTURES, Workspace, git_add, run_json, symlink_or_skip, write
 
@@ -37,7 +37,11 @@ def _prepare(rule_id: str, variant: str, workspace: Workspace) -> Path:
             shutil.copytree(home_source, workspace.home, dirs_exist_ok=True)
             break
     rig = workspace.home / "work" / variant
-    shutil.copytree(fixture / variant, rig, ignore=lambda directory, _names: ["home"] if Path(directory) == fixture / variant else [])
+    excluded = ["home", "memory"]
+    shutil.copytree(fixture / variant, rig, ignore=lambda directory, _names: excluded if Path(directory) == fixture / variant else [])
+    memory_source = fixture / variant / "memory"
+    if memory_source.is_dir():
+        shutil.copytree(memory_source, memory_dir(rig.resolve(), workspace.home.resolve()), dirs_exist_ok=True)
     gitfixture = rig / ".gitfixture"
     if gitfixture.is_file():
         git_add(rig, gitfixture.read_text(encoding="utf-8").split())

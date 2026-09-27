@@ -57,6 +57,15 @@ def test_memory_index_counts_only_its_loaded_head(workspace: Workspace) -> None:
     assert row.tokens_est == _instructions("".join(lines[:200]))
 
 
+def test_memory_index_head_splits_only_on_newlines(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    lines = [f"- [Entry {index:03d}](entry-{index:03d}.md)\N{LINE SEPARATOR}fact\fmore\n" for index in range(250)]
+    index_path = write(memory_dir(repo, workspace.home) / "MEMORY.md", "".join(lines))
+    result = budget.compute(discover(repo, workspace.home), 200_000)
+    row = next(source for source in result.every_turn.sources if source.path == index_path)
+    assert row.tokens_est == _instructions("".join(lines[:200]))
+
+
 def test_memory_index_cuts_at_25000_bytes(workspace: Workspace) -> None:
     repo = workspace.rig()
     text = ("- " + "é" * 200 + "\n") * 100

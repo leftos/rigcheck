@@ -17,7 +17,8 @@ _SCANNED_LAYERS = (Layer.REPO, Layer.USER)
 _EVIDENCE = ("sota:#2 (A)", "sota:#23 (B)")
 _DRIVE = re.compile(r"^[A-Za-z]:")
 _PLACEHOLDER_CHARS = frozenset("*?[]{}<>$%`")
-_NOT_PATH_PREFIXES = ("mailto:", "#")
+_NOT_PATH_PREFIXES = ("#",)
+_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]+:")
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=(\S*)$")
 _LOCATION = re.compile(r":\d+(?::\d+)?$")
 _HOST = re.compile(r"^[a-z0-9-]+(\.[a-z0-9-]+)*\.(com|org|net|io|dev|ai|app|co|gg|me|sh|xyz)$", re.IGNORECASE)
@@ -58,31 +59,30 @@ def _first_segment(token: str) -> str:
     return token.removeprefix("./").split("/", 1)[0]
 
 
-def _looks_like_path(token: str) -> bool:
-    if "/" not in token or token.startswith("/") or _DRIVE.match(token):
-        return False
+def _names_no_file(token: str) -> bool:
+    if not token or _SCHEME.match(token):
+        return True
     if "..." in token or "\N{HORIZONTAL ELLIPSIS}" in token or _PLACEHOLDER_CHARS.intersection(token):
-        return False
-    first = _first_segment(token)
-    return first not in SKIP_DIRS and _HOST.match(first) is None
+        return True
+    return _HOST.match(_first_segment(token)) is not None
 
 
-def path_candidate(reference: Reference) -> str | None:
-    """Return the path a code span or link names, normalised to forward slashes, or None when it names none.
+def reference_path(reference: Reference) -> str | None:
+    """Return the file a code span or link may name, normalised to forward slashes, or None when it names none.
 
-    A candidate contains ``/`` or starts with ``./`` or ``../``; has no whitespace, URL scheme,
-    ``mailto:``, leading ``#`` or drive letter; has no glob or placeholder character and no ``...`` or ``…``;
-    is not a bare absolute path; and its first segment is neither a build-output folder (``bin``,
-    ``node_modules`` and the like) nor a host name such as ``github.com``. ``~/`` paths are candidates.
-    Links lose their ``#fragment`` and ``?query`` and are URL-decoded; code spans lose a ``#fragment``,
-    and a span that is one ``NAME=value`` assignment is judged by its value. A trailing ``:line`` or
-    ``:line:column``, and a pytest ``::test`` suffix, are dropped.
+    The text must have no whitespace or leading ``#``; links lose their ``#fragment`` and ``?query``
+    and are URL-decoded; code spans lose a ``#fragment``, and a span that is one ``NAME=value``
+    assignment is judged by its value. A trailing ``:line`` or ``:line:column`` and a pytest ``::test``
+    suffix are dropped, so ``notes.md:12`` names ``notes.md`` and ``tel:5550100`` names ``tel``. What
+    remains names no file when it starts with a URL scheme such as ``https:``, ``mailto:`` or ``tel:``
+    (a single drive letter is not a scheme), holds a glob or placeholder character or ``...`` or ``…``,
+    or its first segment is a host name such as ``github.com``.
 
     Args:
         reference: A reference from :func:`rigcheck.parse.markdown.find_references`.
 
     Returns:
-        The normalised path, or None for fence lines and anything that is not a checkable path.
+        The normalised path, or None for fence lines and anything that names no file.
     """
     if reference.source == "link":
         token = _link_target(reference.raw)
@@ -93,7 +93,26 @@ def path_candidate(reference: Reference) -> str | None:
     if token is None:
         return None
     token = _LOCATION.sub("", token.split("::", 1)[0]).replace("\\", "/")
-    return token if _looks_like_path(token) else None
+    return None if _names_no_file(token) else token
+
+
+def path_candidate(reference: Reference) -> str | None:
+    """Return the repository path a code span or link names, or None when it names none.
+
+    A candidate is a :func:`reference_path` that also contains ``/`` (or starts with ``./`` or ``../``),
+    is not a bare absolute path or drive-letter path, and whose first segment is not a build-output
+    folder (``bin``, ``node_modules`` and the like). ``~/`` paths are candidates.
+
+    Args:
+        reference: A reference from :func:`rigcheck.parse.markdown.find_references`.
+
+    Returns:
+        The normalised path, or None for fence lines and anything that is not a checkable path.
+    """
+    token = reference_path(reference)
+    if token is None or "/" not in token or token.startswith("/") or _DRIVE.match(token):
+        return None
+    return None if _first_segment(token) in SKIP_DIRS else token
 
 
 def _inside(path: Path, root: Path) -> bool:

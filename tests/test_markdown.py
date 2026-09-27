@@ -125,6 +125,27 @@ def test_read_lenient_continues_a_quoted_value_to_its_closing_quote() -> None:
     assert frontmatter.read_lenient(text, LENIENT_KEYS) == {"description": "multi line", "name": "two lines: here"}
 
 
+def test_read_lenient_reads_a_dotted_key_under_its_parent() -> None:
+    text = "---\ndescription: Use when: x breaks\nmetadata:\n  name: m\n  type: 'user'\n    continued\nother:\n  type: no\ntype: top\n---\n"
+    keys = ("type", "metadata.type", "other.name")
+    assert frontmatter.read_lenient(text, keys) == {"metadata.type": "user continued", "type": "top"}
+
+
+def test_read_lenient_nests_one_level_only() -> None:
+    text = "---\nmetadata:\n  inner:\n    type: deep\n  type: user\n---\n"
+    assert frontmatter.read_lenient(text, ("metadata.type", "metadata.inner.type", "type")) == {"metadata.type": "user"}
+
+
+def test_read_lenient_ignores_a_top_level_dotted_key() -> None:
+    text = "---\ndescription: Use when: x breaks\nmetadata.type: bogus\n---\n"
+    assert frontmatter.parse(text).data is None
+    assert frontmatter.read_lenient(text, ("metadata.type",)) == {}
+
+
+def test_read_lenient_skips_a_parent_with_an_inline_value() -> None:
+    assert frontmatter.read_lenient("---\nmetadata: {type: user}\n---\n", ("metadata.type",)) == {}
+
+
 def test_read_lenient_ignores_unclosed_frontmatter() -> None:
     assert frontmatter.read_lenient("---\nname: x\n\ndescription: x\n", LENIENT_KEYS) == {}
     assert frontmatter.read_lenient("description: x\n", LENIENT_KEYS) == {}

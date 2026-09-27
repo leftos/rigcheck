@@ -3,7 +3,7 @@
 from collections.abc import Iterator
 from pathlib import Path
 
-from rigcheck.discover import AGENTS_MD, IGNORED_BY_CLAUDE, MAX_BYTES, MAX_IMPORT_DEPTH, is_file_like, path_key, resolved_imports
+from rigcheck.discover import AGENTS_MD, IGNORED_BY_CLAUDE, MAX_BYTES, MAX_IMPORT_DEPTH, file_size, is_file_like, path_key, resolved_imports
 from rigcheck.model import Artifact, Finding, Kind, Layer, LoadClass, Rig, Severity, unc_link_target
 from rigcheck.rules import REGISTRY, emit, rule
 
@@ -21,15 +21,6 @@ def _importers(rig: Rig) -> list[Artifact]:
     return [a for a in rig.artifacts if a.kind is Kind.INSTRUCTIONS and a.load_class is not LoadClass.NOT_LOADED]
 
 
-def _size(artifact: Artifact) -> int:
-    if unc_link_target(artifact.path) is not None:
-        return 0
-    try:
-        return artifact.path.stat().st_size
-    except OSError:
-        return 0
-
-
 @rule(
     "instructions-too-large",
     "core",
@@ -40,7 +31,7 @@ def _size(artifact: Artifact) -> int:
 def instructions_too_large(rig: Rig) -> Iterator[Finding]:
     """An instruction or rule file is over 4 MiB, so Claude Code skips it."""
     for artifact in rig.artifacts:
-        size = _size(artifact) if artifact.kind in _SIZED_KINDS else 0
+        size = file_size(artifact.path) if artifact.kind in _SIZED_KINDS else 0
         if size > MAX_BYTES:
             yield emit("instructions-too-large", artifact, f"{artifact.path.name} is {size / _MIB:.1f} MiB; Claude Code does not load it", None)
 
