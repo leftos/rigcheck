@@ -14,4 +14,5 @@ Start here. The plan index is [plans/MAIN.md](plans/MAIN.md).
 - **Pack**: a named set of rules. `core` holds rules backed by official documentation or graded evidence; `house` holds opinionated conventions and is off unless enabled.
 - **Deep check**: an opt-in check (`--deep`) that asks Claude, through headless `claude -p`, to judge what code cannot: contradictions, reworded duplicates, vague instructions.
 - **Fix brief**: a Markdown file rigcheck writes that an agent can execute to fix a set of findings. rigcheck never edits the checked files itself.
+- **Frontmatter retry**: Claude Code's second parse of a frontmatter block that strict YAML rejects: it re-quotes unquoted values holding `: ` or a YAML indicator and parses again; rigcheck reproduces it, so `data` is what Claude Code loads ([research/frontmatter-probe.md](research/frontmatter-probe.md)).
 - **Suppression**: a per-repo config entry that silences a rule, globally or for a path; every suppression must carry a reason.

@@ -106,7 +106,7 @@ def _types(text: str) -> dict[str, str]:
     parsed = frontmatter.parse(text)
     if not parsed.present:
         return {}
-    if parsed.data is None:
+    if parsed.strict_error is not None or parsed.data is None:
         raw: dict[str, Any] = frontmatter.read_lenient(text, _TYPE_KEYS)
     else:
         metadata = parsed.data.get("metadata")

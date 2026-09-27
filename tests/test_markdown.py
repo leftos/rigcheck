@@ -44,10 +44,181 @@ def test_frontmatter_cases() -> None:
     parsed = frontmatter.parse("﻿---\npaths:\n  - src/**\n---\nBody\n")
     assert parsed.data == {"paths": ["src/**"]}
     assert parsed.body_line == 5
-    assert frontmatter.parse("---\nname: x\n").error == "unclosed frontmatter"
-    assert frontmatter.parse("---\n- a\n---\n").error is not None
-    assert frontmatter.parse("---\nkey: [unclosed\n---\n").error is not None
+    assert frontmatter.parse("---\nname: x\n").strict_error == "unclosed frontmatter"
+    assert frontmatter.parse("---\nname: x\n").load_error == "unclosed frontmatter"
+    assert frontmatter.parse("---\n- a\n---\n").strict_error is not None
+    assert frontmatter.parse("---\n- a\n---\n").load_error is not None
+    assert frontmatter.parse("---\nkey: [unclosed\n---\n").strict_error is not None
     assert frontmatter.parse("---\n---\n").data == {}
+
+
+def _probe_text(lines: list[str], eol: str, bom: bool) -> str:
+    return ("\ufeff" if bom else "") + eol.join(["---", "name: v", *lines, "---", "", "Body."]) + eol
+
+
+LF, CRLF = "\n", "\r\n"
+REJECTED = None
+
+# One row per variant of the `claude plugin validate` probe: (lines after `name: v`, line ending, BOM, extra keys Claude Code loads or
+# REJECTED, strict YAML loads it).
+PROBE_ROWS = {
+    "plain": (["description: simple text"], LF, False, {"description": "simple text"}, True),
+    "colon": (["description: use when: it breaks"], LF, False, {"description": "use when: it breaks"}, False),
+    "colon-trailing": (["description: use when:"], LF, False, REJECTED, False),
+    "colon-dq-inside": (['description: say "a b" then: c'], LF, False, {"description": 'say "a b" then: c'}, False),
+    "colon-sq-inside": (["description: it's here: now"], LF, False, {"description": "it's here: now"}, False),
+    "colon-dq-apostrophe": (
+        ['description: phrases "don\'t do x", "y z": more'],
+        LF,
+        False,
+        {"description": 'phrases "don\'t do x", "y z": more'},
+        False,
+    ),
+    "dq-start-continues": (['description: "quoted" then more'], LF, False, REJECTED, False),
+    "dq-start-continues-colon": (['description: "quoted" then: more'], LF, False, {"description": '"quoted" then: more'}, False),
+    "sq-start-continues": (["description: 'quoted' then more"], LF, False, REJECTED, False),
+    "dq-start-unclosed": (['description: "never closed'], LF, False, REJECTED, False),
+    "hash": (["description: a # comment"], LF, False, {"description": "a"}, True),
+    "hash-colon": (["description: a: b # c"], LF, False, {"description": "a: b # c"}, False),
+    "hash-nospace": (["description: a#b: c"], LF, False, {"description": "a#b: c"}, False),
+    "emdash": (["description: a \u2014 b"], LF, False, {"description": "a \u2014 b"}, True),
+    "emdash-colon": (["description: a \u2014 b: c"], LF, False, {"description": "a \u2014 b: c"}, False),
+    "multiline": (["description: first line", "  second line"], LF, False, {"description": "first line second line"}, True),
+    "multiline-colon-first": (["description: first: line", "  second line"], LF, False, REJECTED, False),
+    "multiline-colon-second": (["description: first line", "  second: line"], LF, False, REJECTED, False),
+    "block-literal-colon": (["description: |", "  first: line", "  second"], LF, False, {"description": "first: line\nsecond"}, True),
+    "list": (["description: d", "allowed-tools:", "  - Read", "  - Grep"], LF, False, {"description": "d", "allowed-tools": ["Read", "Grep"]}, True),
+    "list-colon": (
+        ["description: use when: x", "allowed-tools:", "  - Read", "  - Grep"],
+        LF,
+        False,
+        {"description": "use when: x", "allowed-tools": ["Read", "Grep"]},
+        False,
+    ),
+    "flow-list-colon": (
+        ["description: use when: x", "allowed-tools: [Read, Grep]"],
+        LF,
+        False,
+        {"description": "use when: x", "allowed-tools": "[Read, Grep]"},
+        False,
+    ),
+    "bom": (["description: simple text"], LF, True, {"description": "simple text"}, True),
+    "bom-colon": (["description: use when: x"], LF, True, {"description": "use when: x"}, False),
+    "crlf": (["description: simple text"], CRLF, False, {"description": "simple text"}, True),
+    "crlf-colon": (["description: use when: x"], CRLF, False, REJECTED, False),
+    "crlf-colon-dq-apostrophe-emdash": (['description: phrases "don\'t do x", "y z": more \u2014 end'], CRLF, False, REJECTED, False),
+    "crlf-list-colon": (["description: use when: x", "allowed-tools:", "  - Read"], CRLF, False, REJECTED, False),
+    "tab-continuation": (["description: first", "\tsecond"], LF, False, {"description": "first second"}, False),
+    "tab-list": (["description: d", "allowed-tools:", "\t- Read"], LF, False, {"description": "d", "allowed-tools": ["Read"]}, False),
+    "flow-start-colon": (["description: [a: b"], LF, False, {"description": "[a: b"}, False),
+    "brace-start-colon": (["description: {a: b"], LF, False, {"description": "{a: b"}, False),
+    "at-start-colon": (["description: @a: b"], LF, False, {"description": "@a: b"}, False),
+    "backtick-start-colon": (["description: `a`: b"], LF, False, {"description": "`a`: b"}, False),
+    "star-start-colon": (["description: *a: b"], LF, False, {"description": "*a: b"}, False),
+    "amp-start-colon": (["description: &a: b"], LF, False, {"description": "&a: b"}, False),
+    "backslash-colon": (["description: a\\b: c"], LF, False, {"description": "a\\b: c"}, False),
+    "colon-then-key": (["description: a: b", "model: sonnet"], LF, False, {"description": "a: b", "model": "sonnet"}, False),
+    "dup-key": (["description: a", "description: b"], LF, False, {"description": "b"}, True),
+    "key-colon-only-junk": (["description: a", "not a key line"], LF, False, REJECTED, False),
+    "indented-key-colon": (["description: a", "  nested: b: c"], LF, False, REJECTED, False),
+    "hyphen-key-colon": (["description: d", "argument-hint: a: b"], LF, False, {"description": "d", "argument-hint": "a: b"}, False),
+    "underscore-key-colon": (["description: d", "my_key: a: b"], LF, False, {"description": "d", "my_key": "a: b"}, False),
+    "digit-key-colon": (["description: d", "key2: a: b"], LF, False, REJECTED, False),
+    "at-start": (["description: @a b"], LF, False, {"description": "@a b"}, False),
+    "backtick-start": (["description: `a` b"], LF, False, {"description": "`a` b"}, False),
+    "star-start": (["description: *a b"], LF, False, {"description": "*a b"}, False),
+    "brace-start": (["description: {a b"], LF, False, {"description": "{a b"}, False),
+    "bracket-start": (["description: [a b"], LF, False, {"description": "[a b"}, False),
+    "bracket-inside": (["description: a [b"], LF, False, {"description": "a [b"}, True),
+    "pipe-start": (["description: |a b"], LF, False, {"description": "|a b"}, False),
+    "gt-start": (["description: >a b"], LF, False, {"description": ">a b"}, False),
+    "percent-start": (["description: %a b"], LF, False, {"description": "%a b"}, False),
+    "bang-start-junk": (["description: !a !b c"], LF, False, {"description": "!a !b c"}, False),
+    "quoted-both-ends-colon": (['description: "a" b: "c"'], LF, False, REJECTED, False),
+    "sq-both-ends-colon": (["description: 'a' b: 'c'"], LF, False, REJECTED, False),
+    "backslash-bad-escape-colon": (["description: a\\q: c"], LF, False, {"description": "a\\q: c"}, False),
+    "upper-key-colon": (["description: d", "Foo: a: b"], LF, False, {"description": "d", "Foo": "a: b"}, False),
+    "two-space-colon": (["description:  a: b"], LF, False, {"description": "a: b"}, False),
+    "tab-after-key-colon": (["description:\ta: b"], LF, False, {"description": "a: b"}, False),
+    "trailing-space-colon": (["description: a: b   "], LF, False, {"description": "a: b   "}, False),
+    "colon-in-list-item": (["description: d", "allowed-tools:", "  - a: b: c"], LF, False, REJECTED, False),
+    "agent-colon": (
+        ["description: use when: it breaks", "tools: Read, Grep"],
+        LF,
+        False,
+        {"description": "use when: it breaks", "tools": "Read, Grep"},
+        False,
+    ),
+    "agent-dq-inside-colon": (
+        ['description: Use it. "a b, c d" then e: f', "tools: Read, mcp__s__t"],
+        LF,
+        False,
+        {"description": 'Use it. "a b, c d" then e: f', "tools": "Read, mcp__s__t"},
+        False,
+    ),
+    "agent-crlf-colon": (["description: use when: it breaks"], CRLF, False, REJECTED, False),
+    "agent-crlf-plain": (["description: plain"], CRLF, False, {"description": "plain"}, True),
+}
+
+
+@pytest.mark.parametrize(("lines", "eol", "bom", "loaded", "strict_loads"), list(PROBE_ROWS.values()), ids=list(PROBE_ROWS))
+def test_frontmatter_loads_as_claude_code_does(lines: list[str], eol: str, bom: bool, loaded: dict[str, object] | None, strict_loads: bool) -> None:
+    parsed = frontmatter.parse(_probe_text(lines, eol, bom))
+    assert parsed.data == (None if loaded is None else {"name": "v", **loaded})
+    assert (parsed.strict_error is None) is strict_loads
+    assert (parsed.load_error is None) is (loaded is not None)
+    assert parsed.body_line == len(lines) + 4
+
+
+def test_frontmatter_key_lines_are_file_lines() -> None:
+    parsed = frontmatter.parse("---\nname: x\ndescription: y\ntools:\n  - a\n---\nBody.\n")
+    assert parsed.key_lines == {"name": 2, "description": 3, "tools": 4}
+
+
+def test_frontmatter_key_lines_on_a_block_claude_code_rejects() -> None:
+    parsed = frontmatter.parse("---\nname: x\n\ndescription: a: b\r\n---\n")
+    assert parsed.data is None
+    assert parsed.key_lines == {"name": 2, "description": 4}
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ('---\n"name": n\ndescription: d\n---\n', {"name": 2, "description": 3}),
+        ("---\n'name': n\ndescription: d\n---\n", {"name": 2, "description": 3}),
+        ("---\n1: x\ndescription: d\n---\n", {"1": 2, "description": 3}),
+    ],
+    ids=["double-quoted", "single-quoted", "integer"],
+)
+def test_key_lines_reads_a_quoted_key(text: str, expected: dict[str, int]) -> None:
+    assert frontmatter.parse(text).key_lines == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (True, True),
+        (1, True),
+        ("true", True),
+        ("Yes", True),
+        ("ON", True),
+        ("1", True),
+        (False, False),
+        (0, False),
+        ("false", False),
+        ("No", False),
+        ("off", False),
+        ("0", False),
+        (None, None),
+        (2, None),
+        ("maybe", None),
+        ("", None),
+        (1.0, None),
+        (["true"], None),
+    ],
+)
+def test_as_bool(value: object, expected: bool | None) -> None:
+    assert frontmatter.as_bool(value) is expected
 
 
 def test_find_references_spans_and_links_with_lines() -> None:
@@ -138,7 +309,7 @@ def test_read_lenient_nests_one_level_only() -> None:
 
 def test_read_lenient_ignores_a_top_level_dotted_key() -> None:
     text = "---\ndescription: Use when: x breaks\nmetadata.type: bogus\n---\n"
-    assert frontmatter.parse(text).data is None
+    assert frontmatter.parse(text).strict_error is not None
     assert frontmatter.read_lenient(text, ("metadata.type",)) == {}
 
 

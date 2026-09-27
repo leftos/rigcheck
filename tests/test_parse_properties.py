@@ -14,13 +14,28 @@ PROSE = st.text(alphabet="abcdefghij @.`~/\n-*#", max_size=60)
 def test_frontmatter_parse_never_raises(text: str) -> None:
     result = frontmatter.parse(text)
     assert result.body_line >= 1
-    assert result.present or (result.data is None and result.error is None)
+    assert result.present or (result.data is None and result.strict_error is None and result.load_error is None)
+    if result.present and result.load_error is None:
+        assert result.data is not None
 
 
 @settings(deadline=None)
 @given(st.text())
 def test_frontmatter_after_fence_never_raises(body: str) -> None:
     frontmatter.parse("---\n" + body)
+
+
+FRONTMATTER_LINE = st.text(alphabet="ab-_2: \t\"'#[]{}|>@`*&!%\\\r\u2014", max_size=20)
+
+
+@settings(deadline=None)
+@given(st.lists(FRONTMATTER_LINE, max_size=6))
+def test_frontmatter_that_loads_has_data(lines: list[str]) -> None:
+    result = frontmatter.parse("\n".join(["---", *lines, "---", "Body."]))
+    assert result.present
+    assert (result.load_error is None) is (result.data is not None)
+    assert (result.strict_error is None) <= (result.load_error is None)
+    assert all(1 < line <= len(lines) + 1 for line in result.key_lines.values())
 
 
 @settings(deadline=None)

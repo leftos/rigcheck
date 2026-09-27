@@ -133,12 +133,14 @@ def test_rules_load_every_turn_unless_path_scoped(workspace: Workspace) -> None:
     repo = workspace.rig()
     write(repo / ".claude" / "rules" / "always.md", "Always.\n")
     write(repo / ".claude" / "rules" / "api" / "scoped.md", "---\npaths:\n  - src/api/**\n---\nScoped.\n")
-    write(repo / ".claude" / "rules" / "broken.md", "---\npaths: [unclosed\n---\nBroken.\n")
+    write(repo / ".claude" / "rules" / "broken.md", "---\npaths:\n  - src/**\ndescription: 'a' b: 'c'\n---\nBroken.\n")
+    write(repo / ".claude" / "rules" / "nonstandard.md", "---\npaths:\n  - src/**\ndescription: a: b\n---\nLoads anyway.\n")
     write(workspace.home / ".claude" / "rules" / "mine.md", "Mine.\n")
     artifacts = _by_name(discover(repo, workspace.home))
     assert artifacts["always.md"].load_class is LoadClass.EVERY_TURN
     assert artifacts["scoped.md"].load_class is LoadClass.ON_DEMAND
     assert artifacts["broken.md"].load_class is LoadClass.EVERY_TURN
+    assert artifacts["nonstandard.md"].load_class is LoadClass.ON_DEMAND
     assert (artifacts["mine.md"].kind, artifacts["mine.md"].layer) == (Kind.RULE, Layer.USER)
 
 

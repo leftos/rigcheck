@@ -10,22 +10,38 @@ FENCE = "---"
 
 _BLOCK_MARKER = re.compile(r"[|>](?:[+-]?[1-9]?|[1-9][+-])")
 _QUOTES = ("'", '"')
+_BOM = "\ufeff"
+
+_RETRY_KEY_LINE = re.compile(r"([a-zA-Z_-]+):\s+([^\r\n\u2028\u2029]+)")
+"""A line Claude Code's retry may re-quote: its value is JavaScript's ``.+``, so a line ending in CR never matches."""
+_RETRY_SPECIAL = re.compile(r"[{}\[\]*&#!|>%@`]|: ")
+_LEADING_SPACE = re.compile(r"[ \t]+")
+_KEY_LINE = re.compile(r"([^\s:#-][^:]*?):(?:\s|$)")
+_TRUE = frozenset({"true", "yes", "on", "1"})
+_FALSE = frozenset({"false", "no", "off", "0"})
+_SYNTAX_ERROR = object()
+"""What ``_load`` returns in place of data when the text is not YAML at all."""
 
 
 @dataclass(frozen=True)
 class Frontmatter:
-    """The result of parsing a file's frontmatter.
+    """The result of parsing a file's frontmatter, as strict YAML and as Claude Code loads it.
 
     Attributes:
         present: True when the file's first line is exactly ``---``.
-        data: The parsed mapping, or None when absent or invalid.
-        error: Why the block could not be used, or None.
+        data: The mapping Claude Code loads: strict YAML's when it parses, else the mapping of Claude Code's
+            retry, which re-quotes unquoted values holding ``: `` or a YAML indicator; None when absent or rejected.
+        strict_error: Why strict YAML cannot use the block, or None.
+        load_error: Why Claude Code rejects the block, or None when it loads (or is absent).
+        key_lines: The 1-based file line of each top-level key found at column 0; the last wins for a repeated key.
         body_line: 1-based line number where the body starts.
     """
 
     present: bool
     data: dict[Any, Any] | None
-    error: str | None
+    strict_error: str | None
+    load_error: str | None
+    key_lines: dict[str, int]
     body_line: int
 
 
@@ -36,30 +52,100 @@ def parse(text: str) -> Frontmatter:
         text: The whole file content.
 
     Returns:
-        The frontmatter, with ``error`` set when the block is unclosed, not YAML, or not a mapping.
+        The frontmatter. An unclosed block or a non-mapping sets both errors; YAML that only Claude Code's retry
+        reads sets ``strict_error`` alone.
     """
-    lines = _lines(text)
+    raw = text.removeprefix(_BOM).split("\n")
+    lines = [line.removesuffix("\r") for line in raw]
     if lines[0] != FENCE:
-        return Frontmatter(present=False, data=None, error=None, body_line=1)
+        return Frontmatter(present=False, data=None, strict_error=None, load_error=None, key_lines={}, body_line=1)
     try:
         closing = lines.index(FENCE, 1)
     except ValueError:
-        return Frontmatter(present=True, data=None, error="unclosed frontmatter", body_line=1)
-    body_line = closing + 2
-    block = "\n".join(lines[1:closing])
+        unclosed = "unclosed frontmatter"
+        return Frontmatter(present=True, data=None, strict_error=unclosed, load_error=unclosed, key_lines={}, body_line=1)
+    data, strict_error = _load("\n".join(lines[1:closing]))
+    load_error = strict_error
+    if strict_error is not None and data is _SYNTAX_ERROR:
+        data, load_error = _load(_retry_block(raw[1:closing]))
+    loaded = data if isinstance(data, dict) else None
+    return Frontmatter(
+        present=True,
+        data=loaded,
+        strict_error=strict_error,
+        load_error=load_error,
+        key_lines=_key_lines(lines[1:closing], loaded),
+        body_line=closing + 2,
+    )
+
+
+def _load(block: str) -> tuple[Any, str | None]:
+    """Parse ``block`` as YAML; return the mapping and None, or ``_SYNTAX_ERROR`` or the non-mapping value and why."""
     try:
         data = yaml.safe_load(block)
     except Exception as exc:  # noqa: BLE001 - any parser failure on arbitrary text becomes a reported error, never a crash
-        return Frontmatter(present=True, data=None, error=f"invalid YAML: {exc}", body_line=body_line)
+        return _SYNTAX_ERROR, f"invalid YAML: {exc}"
     if data is None:
-        data = {}
+        return {}, None
     if not isinstance(data, dict):
-        return Frontmatter(present=True, data=None, error=f"frontmatter is a {type(data).__name__}, not a mapping", body_line=body_line)
-    return Frontmatter(present=True, data=data, error=None, body_line=body_line)
+        return data, f"frontmatter is a {type(data).__name__}, not a mapping"
+    return data, None
+
+
+def _retry_line(line: str) -> str:
+    """Re-quote ``line``'s value as Claude Code's retry does, and expand its leading tabs (which Claude Code accepts)."""
+    match = _RETRY_KEY_LINE.fullmatch(line)
+    if match:
+        key, value = match.groups()
+        wrapped = len(value) > 1 and value[0] in _QUOTES and value[-1] == value[0]
+        if not wrapped and _RETRY_SPECIAL.search(value):
+            escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+            line = f'{key}: "{escaped}"'
+    indent = _LEADING_SPACE.match(line)
+    if indent:
+        line = indent.group().replace("\t", "  ") + line[indent.end() :]
+    return line.removesuffix("\r")
+
+
+def _retry_block(raw: list[str]) -> str:
+    return "\n".join(_retry_line(line) for line in raw)
+
+
+def _key_lines(block: list[str], data: dict[Any, Any] | None) -> dict[str, int]:
+    """Map each column-0 key in ``block`` (file line 2 onwards) to its file line; only keys in ``data`` when it loaded."""
+    found: dict[str, int] = {}
+    for index, line in enumerate(block):
+        match = _KEY_LINE.match(line)
+        if match:
+            found[_unquote(match.group(1).rstrip())] = index + 2
+    if data is None:
+        return found
+    loaded = {str(key) for key in data}
+    return {key: line for key, line in found.items() if key in loaded}
+
+
+def as_bool(value: object) -> bool | None:
+    """Read a frontmatter flag the way Claude Code reads booleans.
+
+    Args:
+        value: A value from ``Frontmatter.data``.
+
+    Returns:
+        True for ``True``, ``1`` and the strings true/yes/on/1 in any case; False for ``False``, ``0`` and
+        false/no/off/0; None for anything else.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return {1: True, 0: False}.get(value)
+    if isinstance(value, str):
+        word = value.strip().lower()
+        return True if word in _TRUE else False if word in _FALSE else None
+    return None
 
 
 def _lines(text: str) -> list[str]:
-    return [line.removesuffix("\r") for line in text.removeprefix("﻿").split("\n")]
+    return [line.removesuffix("\r") for line in text.removeprefix(_BOM).split("\n")]
 
 
 def _join(parts: list[str]) -> str:
