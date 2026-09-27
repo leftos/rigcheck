@@ -2,7 +2,7 @@
 
 A local validator for the instruction layer of coding agents: `CLAUDE.md`, `AGENTS.md`, `.claude/rules`, skills, subagent definitions, hooks, settings and memory files. It reports ranked findings and writes fix briefs an agent can carry out.
 
-Status: early development. The instruction-file, `@import` and reference rules (stale paths and npm/just/make commands) work; the rest of the catalog is being built per [docs/plans/MAIN.md](docs/plans/MAIN.md).
+Status: early development. The instruction-file, `@import`, reference (stale paths and npm/just/make commands) and auto-memory rules work, and both reports open with a context budget; the rest of the catalog is being built per [docs/plans/MAIN.md](docs/plans/MAIN.md).
 
 ## Usage
 

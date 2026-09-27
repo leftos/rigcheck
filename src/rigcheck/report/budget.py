@@ -94,7 +94,8 @@ def loaded_text(rig: Rig, artifact: Artifact) -> str:
     if artifact.kind in _STRIPPED_KINDS:
         return strip_html_comments(text)
     if artifact.kind is Kind.MEMORY_INDEX:
-        head = "".join(text.splitlines(keepends=True)[:MEMORY_INDEX_LINES])
+        lines = text.split("\n")
+        head = "\n".join(lines[:MEMORY_INDEX_LINES]) + ("\n" if len(lines) > MEMORY_INDEX_LINES else "")
         return head.encode("utf-8")[:MEMORY_INDEX_BYTES].decode("utf-8", errors="ignore")
     return text
 
