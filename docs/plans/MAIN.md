@@ -4,18 +4,17 @@
 
 - [x] Research: official guidance (Anthropic docs, AGENTS.md spec) — [research/official.md](../research/official.md)
 - [x] Research: non-official state of the art, evidence-graded — [research/sota.md](../research/sota.md)
-- [ ] Rule catalog from both reports: `core` pack (official or grade A/B evidence only), `house` pack (opinionated, off by default), rejected list with reasons
-- [ ] Architecture plan and approval (subplan to be written)
+- [x] Rule catalog and architecture, approved 2026-09-27 — [v1.md](v1.md)
+- [x] M1 Scaffold: Python 3.13, uv, ruff, ty, pytest, prek hooks, CI
+- [ ] M2 Core engine: model, discovery (repo, user, plugin, memory layers), parsers, engine, terminal and JSON reports, instruction/import/reference/memory rules, budget report — see [v1.md](v1.md#milestones-one-pr-each-merged-as-they-land)
 
 ## Next up
 
-- [ ] Scaffold: Python 3.13, uv, ruff, ty, pytest, prek hooks, CI
-- [ ] Discovery of the effective setup (repo, user, plugin, memory layers)
-- [ ] Deterministic checks for the `core` pack
-- [ ] Reports: terminal, JSON, fix brief
-- [ ] Suppression config with required reasons
-- [ ] `--deep` checks via `claude -p`
-- [ ] `house` pack
+- [ ] M3 Component rules: skills, agents, commands, output styles, rules directory
+- [ ] M4 Config rules: hooks, settings (vendored schema), MCP, secrets, duplication
+- [ ] M5 Suppressions, advice pack, `explain`, `brief`
+- [ ] M6 `--deep` checks via `claude -p`
+- [ ] M7 House pack, the `rigcheck` Claude Code skill, install docs
 
 ## Decisions (user, 2026-09-27)
 

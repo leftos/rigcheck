@@ -1,0 +1,64 @@
+[project]
+name = "rigcheck"
+version = "0.1.0"
+description = "Local validator for coding-agent instruction setups (Claude Code, AGENTS.md)"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Leftos Aslanoglou", email = "leftos@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "jsonschema==4.26.0",
+    "markdown-it-py==4.2.0",
+    "pyyaml==6.0.3",
+]
+
+[project.scripts]
+rigcheck = "rigcheck.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.18,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "hypothesis==6.168.2",
+    "pytest==9.1.1",
+    "ruff==0.16.9",
+    "ty==0.0.84",
+    "types-jsonschema==4.26.0.20260518",
+    "types-pyyaml==6.0.12.20260906",
+]
+
+[tool.ruff]
+line-length = 150
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "RUF", "PTH", "D", "C90", "PL", "TID", "S", "BLE", "RET", "PIE", "PT"]
+ignore = ["D100", "D104", "D105", "D107", "PLR2004"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 8
+
+[tool.ruff.lint.pylint]
+max-args = 5
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "D", "PLR2004"]
+
+[tool.ty.rules]
+possibly-unresolved-reference = "error"
+unused-ignore-comment = "error"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
