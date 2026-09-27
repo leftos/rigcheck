@@ -1,0 +1,376 @@
+"""Effective-setup discovery: builds the Rig from the repo, memory, user and plugin layers."""
+
+import json
+import os
+import re
+from collections import deque
+from collections.abc import Iterator
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from rigcheck.model import Artifact, Kind, Layer, LoadClass, Rig, git_output, unc_link_target
+from rigcheck.parse import frontmatter
+from rigcheck.parse.markdown import Import, find_imports, strip_html_comments
+
+MAX_BYTES = 4 * 1024 * 1024
+"""Claude Code skips instruction files larger than this."""
+
+MAX_IMPORT_DEPTH = 4
+"""Claude Code follows ``@path`` imports at most this many hops."""
+
+CLAUDE_FAMILY = ("CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md")
+AGENTS_MD = "AGENTS.md"
+IGNORED_BY_CLAUDE = ("AGENTS.local.md", "AGENTS.override.md")
+SKIP_DIRS = frozenset({".git", "node_modules", ".venv", "bin", "obj", "dist", "build", ".tmp"})
+
+_CLAUDE_DIR_FILES = (
+    ("skills/*/SKILL.md", Kind.SKILL, LoadClass.ON_INVOKE),
+    ("commands/**/*.md", Kind.COMMAND, LoadClass.ON_INVOKE),
+    ("agents/**/*.md", Kind.AGENT, LoadClass.ON_INVOKE),
+    ("output-styles/*.md", Kind.OUTPUT_STYLE, LoadClass.ON_DEMAND),
+    ("settings.json", Kind.SETTINGS, LoadClass.CONFIG),
+    ("settings.local.json", Kind.SETTINGS, LoadClass.CONFIG),
+)
+_PLUGIN_FILES = (
+    ("skills/*/SKILL.md", Kind.SKILL, LoadClass.ON_INVOKE),
+    ("agents/*.md", Kind.AGENT, LoadClass.ON_INVOKE),
+    ("commands/*.md", Kind.COMMAND, LoadClass.ON_INVOKE),
+    ("hooks/hooks.json", Kind.HOOKS_CONFIG, LoadClass.CONFIG),
+    (".mcp.json", Kind.MCP_CONFIG, LoadClass.CONFIG),
+    (".claude-plugin/plugin.json", Kind.PLUGIN_MANIFEST, LoadClass.CONFIG),
+)
+
+
+def path_key(path: Path) -> str:
+    """Return a comparison key for ``path``: normalized, and case-folded where the OS is case-insensitive."""
+    return os.path.normcase(os.path.normpath(path))
+
+
+def resolve_import(raw: str, importer: Path, home: Path) -> Path:
+    """Resolve an ``@path`` import the way Claude Code does.
+
+    Args:
+        raw: The import as written, without the ``@``.
+        importer: The file containing the import.
+        home: The home directory ``~`` expands to.
+
+    Returns:
+        The normalized path; relative imports resolve against the importing file's directory.
+    """
+    if raw.startswith("~/"):
+        resolved = home / raw[2:]
+    elif Path(raw).is_absolute() or raw.startswith("/"):
+        resolved = Path(raw)
+    else:
+        resolved = importer.parent / raw
+    return Path(os.path.normpath(resolved))
+
+
+def import_candidates(text: str) -> list[Import]:
+    """Return the imports Claude Code would expand in ``text`` (block HTML comments removed first)."""
+    return find_imports(strip_html_comments(text))
+
+
+def resolved_imports(rig: Rig, artifact: Artifact) -> list[tuple[Import, Path]]:
+    """Return each import in ``artifact`` with the path it resolves to."""
+    return [(item, resolve_import(item.raw, artifact.path, rig.home)) for item in import_candidates(rig.text(artifact.path))]
+
+
+def is_file_like(path: Path) -> bool:
+    """Return True for a regular file, or for a network-path symlink (never followed, to avoid network access)."""
+    return unc_link_target(path) is not None or path.is_file()
+
+
+def encode_project(path: Path) -> str:
+    r"""Encode a project path the way Claude Code names its ``~/.claude/projects`` folder (``D:\yaat`` → ``D--yaat``)."""
+    return re.sub(r"[^A-Za-z0-9-]", "-", str(path))
+
+
+def memory_dir(repo_root: Path, home: Path) -> Path:
+    """Return the auto-memory folder Claude Code uses for ``repo_root``."""
+    return home / ".claude" / "projects" / encode_project(repo_root) / "memory"
+
+
+def _loads(path: Path) -> bool:
+    if unc_link_target(path) is not None:
+        return False
+    try:
+        return path.stat().st_size <= MAX_BYTES
+    except OSError:
+        return False
+
+
+def _load_class(path: Path) -> LoadClass:
+    return LoadClass.EVERY_TURN if _loads(path) else LoadClass.NOT_LOADED
+
+
+def _is_below(path: Path, ancestor: Path) -> bool:
+    child, parent = Path(path_key(path)), Path(path_key(ancestor))
+    return child != parent and child.is_relative_to(parent)
+
+
+@dataclass
+class _Builder:
+    target: Path
+    repo_root: Path
+    home: Path
+    in_git: bool
+    artifacts: dict[str, Artifact] = field(default_factory=dict)
+    problems: list[str] = field(default_factory=list)
+
+    def add(self, artifact: Artifact) -> None:
+        self.artifacts.setdefault(path_key(artifact.path), artifact)
+
+    def read(self, path: Path) -> str | None:
+        try:
+            return path.read_bytes().decode("utf-8", errors="replace")
+        except OSError as exc:
+            self.problems.append(f"cannot read {path}: {exc.strerror or exc}")
+            return None
+
+    def read_json(self, path: Path) -> Any:
+        if not path.is_file():
+            return None
+        text = self.read(path)
+        if text is None:
+            return None
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as exc:
+            self.problems.append(f"malformed JSON in {path}: {exc}")
+            return None
+
+    def add_glob(self, base: Path, patterns: tuple[tuple[str, Kind, LoadClass], ...], layer: Layer, plugin: str | None) -> None:
+        for pattern, kind, load_class in patterns:
+            for path in sorted(base.glob(pattern)):
+                if is_file_like(path):
+                    self.add(Artifact(path, kind, layer, load_class, plugin=plugin))
+
+
+def _chain_dirs(target: Path, home: Path) -> list[Path]:
+    """Directories from the filesystem root (or ``home``, when target is inside it) down to ``target``."""
+    dirs = []
+    home_key = path_key(home)
+    for directory in (target, *target.parents):
+        dirs.append(directory)
+        if path_key(directory) == home_key:
+            break
+    return list(reversed(dirs))
+
+
+def _chain_files(b: _Builder, names: tuple[str, ...]) -> list[Path]:
+    user_file = path_key(b.home / ".claude" / "CLAUDE.md")
+    found = []
+    for directory in _chain_dirs(b.target, b.home):
+        for name in names:
+            path = directory / name
+            if path.exists(follow_symlinks=False) and path_key(path) != user_file:
+                found.append(path)
+    return found
+
+
+def _add_chain(b: _Builder) -> tuple[list[Artifact], set[str]]:
+    """Add the always-on instruction files; return the loaded roots and the shadowed AGENTS.md keys."""
+    chain = _chain_files(b, (*CLAUDE_FAMILY, AGENTS_MD))
+    has_claude = any(path.name != AGENTS_MD for path in chain)
+    roots: list[Artifact] = []
+    shadowed: set[str] = set()
+    user_file = b.home / ".claude" / "CLAUDE.md"
+    if user_file.exists(follow_symlinks=False):
+        roots.append(Artifact(user_file, Kind.INSTRUCTIONS, Layer.USER, _load_class(user_file)))
+    for path in chain:
+        if has_claude and path.name == AGENTS_MD:
+            shadowed.add(path_key(path))
+            roots.append(Artifact(path, Kind.INSTRUCTIONS, Layer.REPO, LoadClass.NOT_LOADED))
+        else:
+            roots.append(Artifact(path, Kind.INSTRUCTIONS, Layer.REPO, _load_class(path)))
+    for path in _chain_files(b, IGNORED_BY_CLAUDE):
+        b.add(Artifact(path, Kind.INSTRUCTIONS, Layer.REPO, LoadClass.NOT_LOADED))
+    for artifact in roots:
+        b.add(artifact)
+    return roots, shadowed
+
+
+def _add_import(b: _Builder, importer: Artifact, path: Path, shadowed: set[str]) -> Artifact | None:
+    key = path_key(path)
+    if (key in b.artifacts and key not in shadowed) or not is_file_like(path):
+        return None
+    depth = importer.import_depth + 1
+    load_class = importer.load_class if depth <= MAX_IMPORT_DEPTH and _loads(path) else LoadClass.NOT_LOADED
+    artifact = Artifact(path, Kind.INSTRUCTIONS, importer.layer, load_class, imported_from=importer.path, import_depth=depth)
+    b.artifacts[key] = artifact
+    shadowed.discard(key)
+    return artifact
+
+
+def _follow_imports(b: _Builder, roots: list[Artifact], shadowed: set[str]) -> None:
+    """Breadth-first over imports, so each file is recorded at its shortest import depth."""
+    queue = deque(root for root in roots if root.load_class is not LoadClass.NOT_LOADED)
+    while queue:
+        importer = queue.popleft()
+        text = b.read(importer.path)
+        if text is None:
+            continue
+        for item in import_candidates(text):
+            added = _add_import(b, importer, resolve_import(item.raw, importer.path, b.home), shadowed)
+            if added is not None and added.load_class is not LoadClass.NOT_LOADED:
+                queue.append(added)
+
+
+def _walk_claude_md(b: _Builder) -> Iterator[Path]:
+    def on_error(error: OSError) -> None:
+        b.problems.append(f"cannot list {error.filename}: {error.strerror or error}")
+
+    for directory, subdirs, files in os.walk(b.target, onerror=on_error):
+        # Junctions are links (Windows' legacy "My Documents"-style ones also deny listing), so the walk does not enter them.
+        subdirs[:] = [name for name in subdirs if name not in SKIP_DIRS and not Path(directory, name).is_junction()]
+        if "CLAUDE.md" in files:
+            yield Path(directory) / "CLAUDE.md"
+
+
+def _repo_claude_md(b: _Builder) -> Iterator[Path]:
+    if not b.in_git:
+        yield from _walk_claude_md(b)
+        return
+    output = git_output(b.repo_root, "ls-files", "-co", "--exclude-standard", "-z")
+    if output is None:
+        b.problems.append(f"git ls-files failed in {b.repo_root}")
+        return
+    for name in output.split("\0"):
+        if name == "CLAUDE.md" or name.endswith("/CLAUDE.md"):
+            yield b.repo_root / name
+
+
+def _add_nested(b: _Builder) -> None:
+    for path in _repo_claude_md(b):
+        if _is_below(path.parent, b.target):
+            b.add(Artifact(path, Kind.NESTED_INSTRUCTIONS, Layer.REPO, LoadClass.ON_DEMAND))
+
+
+def _rule_load_class(b: _Builder, path: Path) -> LoadClass:
+    if not _loads(path):
+        return LoadClass.NOT_LOADED
+    text = b.read(path)
+    parsed = frontmatter.parse(text or "")
+    if parsed.data is not None and "paths" in parsed.data:
+        return LoadClass.ON_DEMAND
+    return LoadClass.EVERY_TURN
+
+
+def _add_claude_dir(b: _Builder, base: Path, layer: Layer) -> None:
+    for path in sorted(base.glob("rules/**/*.md")):
+        if is_file_like(path):
+            b.add(Artifact(path, Kind.RULE, layer, _rule_load_class(b, path)))
+    b.add_glob(base, _CLAUDE_DIR_FILES, layer, None)
+
+
+def _add_claude_dirs(b: _Builder) -> None:
+    user_dir = b.home / ".claude"
+    repo_dir = b.repo_root / ".claude"
+    if path_key(repo_dir) != path_key(user_dir):
+        _add_claude_dir(b, repo_dir, Layer.REPO)
+    _add_claude_dir(b, user_dir, Layer.USER)
+    mcp = b.repo_root / ".mcp.json"
+    if mcp.is_file():
+        b.add(Artifact(mcp, Kind.MCP_CONFIG, Layer.REPO, LoadClass.CONFIG))
+
+
+def _enabled_plugins(b: _Builder) -> dict[str, Any]:
+    """Merge ``enabledPlugins`` from user, project and local settings; later files win."""
+    merged: dict[str, Any] = {}
+    sources = (b.home / ".claude" / "settings.json", b.repo_root / ".claude" / "settings.json", b.repo_root / ".claude" / "settings.local.json")
+    for path in sources:
+        data = b.read_json(path)
+        enabled = data.get("enabledPlugins") if isinstance(data, dict) else None
+        if isinstance(enabled, dict):
+            merged.update(enabled)
+    return merged
+
+
+def _entry_applies(b: _Builder, entry: Any) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    scope = entry.get("scope")
+    if scope == "user":
+        return True
+    project = entry.get("projectPath")
+    return scope in ("project", "local") and isinstance(project, str) and path_key(Path(project)) == path_key(b.repo_root)
+
+
+def _install_path(b: _Builder, name: str, entries: Any) -> Path | None:
+    if not isinstance(entries, list):
+        b.problems.append(f"installed_plugins.json: entry for {name} is not a list")
+        return None
+    entry = next((entry for entry in entries if _entry_applies(b, entry)), None)
+    if entry is None:
+        return None
+    install = entry.get("installPath")
+    if not isinstance(install, str):
+        b.problems.append(f"installed_plugins.json: plugin {name} has no installPath")
+        return None
+    return Path(install)
+
+
+def _add_plugins(b: _Builder) -> None:
+    source = b.home / ".claude" / "plugins" / "installed_plugins.json"
+    data = b.read_json(source)
+    if data is None:
+        return
+    plugins = data.get("plugins") if isinstance(data, dict) else None
+    if not isinstance(plugins, dict):
+        b.problems.append(f'{source}: expected an object with a "plugins" object')
+        return
+    enabled = _enabled_plugins(b)
+    for name, entries in sorted(plugins.items()):
+        if enabled.get(name) is not True:
+            continue
+        install = _install_path(b, name, entries)
+        if install is None:
+            continue
+        if not install.is_dir():
+            b.problems.append(f"plugin {name}: installPath {install} does not exist")
+            continue
+        b.add_glob(install, _PLUGIN_FILES, Layer.PLUGIN, name)
+
+
+def _add_memory(b: _Builder) -> None:
+    directory = memory_dir(b.repo_root, b.home)
+    if not directory.is_dir():
+        return
+    for path in sorted(directory.glob("*.md")):
+        if path.name == "MEMORY.md":
+            b.add(Artifact(path, Kind.MEMORY_INDEX, Layer.MEMORY, LoadClass.EVERY_TURN))
+        else:
+            b.add(Artifact(path, Kind.MEMORY_TOPIC, Layer.MEMORY, LoadClass.ON_DEMAND))
+
+
+def _repo_root(target: Path) -> tuple[Path, bool]:
+    output = git_output(target, "rev-parse", "--show-toplevel")
+    if output is None or not output.strip():
+        return target, False
+    return Path(output.strip()), True
+
+
+def discover(target: Path, home: Path) -> Rig:
+    """Discover the effective setup Claude Code loads for ``target``.
+
+    Problems with unreadable or malformed inputs are collected in ``Rig.problems``; discovery never raises for them.
+    Only this project's own memory folder is read, and ``~/.claude.json`` is never read.
+
+    Args:
+        target: The directory Claude Code would start in.
+        home: The home directory holding ``.claude``.
+
+    Returns:
+        The rig: every artifact with its layer and load class.
+    """
+    repo_root, in_git = _repo_root(target)
+    b = _Builder(target=target, repo_root=repo_root, home=home, in_git=in_git)
+    roots, shadowed = _add_chain(b)
+    _follow_imports(b, roots, shadowed)
+    _add_nested(b)
+    _add_claude_dirs(b)
+    _add_plugins(b)
+    _add_memory(b)
+    return Rig(target=target, repo_root=repo_root, home=home, artifacts=tuple(b.artifacts.values()), problems=tuple(b.problems))

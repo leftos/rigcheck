@@ -49,6 +49,9 @@ max-complexity = 8
 [tool.ruff.lint.pylint]
 max-args = 5
 
+[tool.ruff.lint.isort]
+known-first-party = ["rigcheck", "support"]
+
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
 
