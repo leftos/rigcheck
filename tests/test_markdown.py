@@ -101,7 +101,37 @@ def test_find_references_records_fence_language() -> None:
     assert [(item.raw, item.lang) for item in find_references(text)] == [("make x", "bash"), ("make y", ""), ("make z", "text")]
 
 
+LENIENT_KEYS = ("name", "description")
+
+
+def test_read_lenient_reads_top_level_keys_and_strips_quotes() -> None:
+    text = "---\nname: 'quoted'\nmetadata:\n  description: nested\nother: 1\n---\n\ndescription: body\n"
+    assert frontmatter.read_lenient(text, LENIENT_KEYS) == {"name": "quoted"}
+
+
+def test_read_lenient_continues_a_plain_value_on_more_indented_lines() -> None:
+    text = "---\ndescription: Use this agent when X.\n  Examples: user asks Y\nname: fixer\n---\n"
+    assert frontmatter.read_lenient(text, LENIENT_KEYS) == {"description": "Use this agent when X. Examples: user asks Y", "name": "fixer"}
+
+
+@pytest.mark.parametrize("marker", ["", "|", ">", "|+", ">-", "|2", ">2-", "|-2"])
+def test_read_lenient_joins_block_scalars(marker: str) -> None:
+    text = f"---\ndescription: {marker}\n  Use when: it breaks\n\n  and again\nname: n\n---\n"
+    assert frontmatter.read_lenient(text, LENIENT_KEYS) == {"description": "Use when: it breaks and again", "name": "n"}
+
+
+def test_read_lenient_continues_a_quoted_value_to_its_closing_quote() -> None:
+    text = "---\ndescription: 'multi\n  line'\nname: \"two\nlines: here\"\n---\n"
+    assert frontmatter.read_lenient(text, LENIENT_KEYS) == {"description": "multi line", "name": "two lines: here"}
+
+
+def test_read_lenient_ignores_unclosed_frontmatter() -> None:
+    assert frontmatter.read_lenient("---\nname: x\n\ndescription: x\n", LENIENT_KEYS) == {}
+    assert frontmatter.read_lenient("description: x\n", LENIENT_KEYS) == {}
+
+
 def test_token_estimate_rounds_up() -> None:
-    assert estimate("") == 0
-    assert estimate("abcd") == 2
-    assert estimate("a" * 38) == 10
+    assert estimate("", 2.5) == 0
+    assert estimate("abcd", 2.5) == 2
+    assert estimate("a" * 25, 2.5) == 10
+    assert estimate("a" * 31, 3.0) == 11
