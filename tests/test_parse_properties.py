@@ -2,9 +2,9 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from rigcheck.parse import frontmatter
-from rigcheck.parse.markdown import find_imports, is_candidate, strip_html_comments
+from rigcheck.parse.markdown import find_imports, find_references, is_candidate, strip_html_comments
 
-PATH_CHARS = st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789_-", min_size=1, max_size=8)
+PATH_CHARS = st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789-", min_size=1, max_size=8)
 CANDIDATES = st.builds(lambda stem, ext: f"{stem}.{ext}", PATH_CHARS, st.sampled_from(["md", "txt", "json"]))
 PROSE = st.text(alphabet="abcdefghij @.`~/\n-*#", max_size=60)
 
@@ -28,6 +28,32 @@ def test_frontmatter_after_fence_never_raises(body: str) -> None:
 def test_find_imports_never_raises(text: str) -> None:
     find_imports(text)
     strip_html_comments(text)
+
+
+@settings(deadline=None)
+@given(CANDIDATES)
+def test_candidate_names_cannot_form_emphasis(candidate: str) -> None:
+    assert "_" not in candidate
+    assert "*" not in candidate
+
+
+@settings(deadline=None)
+@given(st.text())
+def test_find_references_never_raises(text: str) -> None:
+    for reference in find_references(text):
+        assert reference.line >= 1
+        assert reference.source in {"span", "link", "fence"}
+
+
+@settings(deadline=None)
+@given(PROSE, CANDIDATES, PROSE)
+def test_fenced_text_yields_no_span_or_link(before: str, candidate: str, after: str) -> None:
+    before, after = before.replace("`", ""), after.replace("`", "")
+    text = f"{before}\n\n```\n`dir/{candidate}` [x](dir/{candidate})\n```\n\n{after}\n"
+    fence_line = text.split("\n").index(f"`dir/{candidate}` [x](dir/{candidate})") + 1
+    found = find_references(text)
+    assert not any(item.line == fence_line and item.source != "fence" for item in found)
+    assert f"dir/{candidate}" not in [item.raw for item in found if item.source != "fence"]
 
 
 @settings(deadline=None)

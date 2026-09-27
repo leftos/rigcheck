@@ -1,7 +1,7 @@
 import pytest
 
 from rigcheck.parse import frontmatter
-from rigcheck.parse.markdown import find_imports, strip_html_comments
+from rigcheck.parse.markdown import Reference, find_imports, find_references, strip_html_comments
 from rigcheck.parse.tokens import estimate
 
 
@@ -48,6 +48,57 @@ def test_frontmatter_cases() -> None:
     assert frontmatter.parse("---\n- a\n---\n").error is not None
     assert frontmatter.parse("---\nkey: [unclosed\n---\n").error is not None
     assert frontmatter.parse("---\n---\n").data == {}
+
+
+def test_find_references_spans_and_links_with_lines() -> None:
+    text = "# Title\n\nSee `docs/a.md` and\nthen [guide](docs/b.md) and `c/d`\n\n- item `e/f`\n"
+    assert find_references(text) == [
+        Reference(line=3, raw="docs/a.md", source="span", lang=""),
+        Reference(line=4, raw="docs/b.md", source="link", lang=""),
+        Reference(line=4, raw="c/d", source="span", lang=""),
+        Reference(line=6, raw="e/f", source="span", lang=""),
+    ]
+
+
+def test_find_references_counts_hard_breaks() -> None:
+    text = "first  \nsecond\\\nthird `x/y`\n"
+    assert find_references(text) == [Reference(line=3, raw="x/y", source="span", lang="")]
+
+
+def test_find_references_fence_lines() -> None:
+    text = "intro\n\n```bash\nnpm run a\n\nmake b\n```\n\n    indented/code\n"
+    assert find_references(text) == [
+        Reference(line=4, raw="npm run a", source="fence", lang="bash"),
+        Reference(line=5, raw="", source="fence", lang="bash"),
+        Reference(line=6, raw="make b", source="fence", lang="bash"),
+        Reference(line=9, raw="indented/code", source="fence", lang=""),
+    ]
+
+
+def test_find_references_skips_autolinks_images_and_comments() -> None:
+    text = "<https://example.com/a>\n\n![pic](img/p.png)\n\n<!-- `docs/c.md` [x](docs/d.md) -->\n\n[ok](docs/e.md)\n"
+    assert find_references(text) == [Reference(line=7, raw="docs/e.md", source="link", lang="")]
+
+
+def test_find_references_skips_code_spans_in_link_text() -> None:
+    text = "[`ground/`](docs/ground/README.md) then `after/x`\n"
+    assert find_references(text) == [
+        Reference(line=1, raw="docs/ground/README.md", source="link", lang=""),
+        Reference(line=1, raw="after/x", source="span", lang=""),
+    ]
+
+
+def test_find_references_counts_lines_inside_multiline_code_spans() -> None:
+    text = "A `multi\nline` span then `src/x.py` here\n"
+    assert find_references(text) == [
+        Reference(line=1, raw="multi line", source="span", lang=""),
+        Reference(line=2, raw="src/x.py", source="span", lang=""),
+    ]
+
+
+def test_find_references_records_fence_language() -> None:
+    text = "```Bash extra\nmake x\n```\n\n```\nmake y\n```\n\n~~~text\nmake z\n~~~\n"
+    assert [(item.raw, item.lang) for item in find_references(text)] == [("make x", "bash"), ("make y", ""), ("make z", "text")]
 
 
 def test_token_estimate_rounds_up() -> None:
