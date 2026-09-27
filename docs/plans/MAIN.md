@@ -23,6 +23,14 @@ M2 remainder, split by rule module (all read [v1.md](v1.md#rule-catalog-v1-ids-f
 - [ ] M6 `--deep` checks via `claude -p`
 - [ ] M7 House pack, the `rigcheck` Claude Code skill, install docs
 
+## Backlog
+
+Leftovers from the M2 reviews, all in `src/rigcheck/rules/references.py` (`reference_path`, `path_candidate`), which `rules/memory.py` shares:
+
+- [ ] The bare-domain filter reads a first segment ending in a listed TLD as a host, so `.sh` makes `[x](deploy.sh)` a host and a missing `deploy.sh` is never reported; tell a file name from a host (e.g. require a dot-separated label before the TLD and a `/` after it, or drop `sh` from the list)
+- [ ] `:line` is stripped before the scheme check, so `tel:5550100` reads as file `tel` at line 5550100 and can be reported as a broken memory link; check for a scheme before stripping `:line`
+- [ ] `reference-path-missing` false positive on D:/yaat: `CLAUDE.md:109` names `docs/crc-update.md`, which lives in the sibling D:/yaat-server, and passes the parent-folder rule because yaat has its own `docs/`; decide whether a path the surrounding text attributes to another repo can be recognised, or leave it to an M5 suppression
+
 ## Decisions (user, 2026-09-27)
 
 - Targets: the Claude Code layer plus `AGENTS.md` as a peer file, including drift between the two.
