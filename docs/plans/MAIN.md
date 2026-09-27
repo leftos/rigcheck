@@ -26,7 +26,7 @@ Rulings (user, 2026-09-27): reserved names match `claude`/`anthropic` as a whole
 - [ ] M3c Discovery and fixture gaps (`discover.py`, `tests/test_rule_catalog.py`): plugin output styles, symlinked rule folders, external scoped rules marked not loaded, plugin-layer fixture support
 - [ ] M3d Rules dir: `rule-key-unknown`, `rule-frontmatter-invalid`, `rule-external-scoped` (RL1, RL2, RL7)
 - [ ] M3e Rule globs in `parse/globs.py`: `rule-glob-invalid`, `rule-glob-unmatched` (RL3)
-- [ ] M3f Skill frontmatter, on skills and commands: `skill-frontmatter-misplaced`, `skill-frontmatter-invalid`, `skill-key-unknown`, `skill-description-missing`, `skill-description-truncated`, `skill-unreachable` (SK1, SK2, SK4, SK19). In a block only the frontmatter retry loads, a flow list such as `allowed-tools: [Read, Grep]` loads as a string, so rules reading `allowed-tools` and `tools` (M3g, M3l) accept a string there
+- [x] M3f Skill frontmatter, on skills and commands: `skill-frontmatter-misplaced`, `skill-frontmatter-invalid`, `skill-key-unknown`, `skill-description-missing`, `skill-description-truncated`, `skill-unreachable` (SK1, SK2, SK4, SK19). In a block only the frontmatter retry loads, a flow list such as `allowed-tools: [Read, Grep]` loads as a string, so rules reading `allowed-tools` and `tools` (M3g, M3l) accept a string there
 - [ ] M3g Skill names and options: `skill-name-mismatch`, `skill-name-reserved`, `skill-fork-option-ignored`, `skill-agent-missing`, `skill-allowed-tools-broad` (SK8, SK20, SK21)
 - [ ] M3h Commands: `command-key-ignored` (SK30)
 - [ ] M3i Skill links: `skill-link-broken`, `skill-link-too-deep`, `skill-link-outside`, `skill-file-unreferenced` (SK11); waits on the `references.py` backlog fixes, since it reuses `reference_path`

@@ -108,7 +108,7 @@ def load(rig: Rig, artifact: Artifact) -> frontmatter.Frontmatter:
     return frontmatter.parse(rig.text(artifact.path))
 
 
-def _yaml_reason(strict_error: str) -> str:
+def yaml_reason(strict_error: str) -> str:
     """Return the line of ``strict_error`` that names the problem, skipping PyYAML's context lines.
 
     Args:
@@ -122,7 +122,7 @@ def _yaml_reason(strict_error: str) -> str:
     return named[-1] if named else lines[0]
 
 
-def _yaml_line(strict_error: str) -> int:
+def yaml_line(strict_error: str) -> int:
     """Return the file line the error points at: the block's line ``N`` is the file's line ``N + 1``.
 
     Args:
@@ -149,5 +149,5 @@ def frontmatter_yaml_nonstandard(rig: Rig) -> Iterator[Finding]:
         parsed = load(rig, artifact)
         if parsed.present and parsed.strict_error is not None and parsed.load_error is None:
             error = parsed.strict_error
-            message = f"frontmatter is not strict YAML ({_yaml_reason(error)}); Claude Code loads it only through its retry"
-            yield emit("frontmatter-yaml-nonstandard", artifact, message, _yaml_line(error))
+            message = f"frontmatter is not strict YAML ({yaml_reason(error)}); Claude Code loads it only through its retry"
+            yield emit("frontmatter-yaml-nonstandard", artifact, message, yaml_line(error))
