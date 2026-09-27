@@ -1,0 +1,2 @@
+# Fixture bytes are test input: line endings are checked out exactly as committed.
+tests/fixtures/** -text
