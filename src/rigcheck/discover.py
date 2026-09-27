@@ -16,6 +16,12 @@ from rigcheck.parse.markdown import Import, find_imports, strip_html_comments
 MAX_BYTES = 4 * 1024 * 1024
 """Claude Code skips instruction files larger than this."""
 
+MEMORY_INDEX_LINES = 200
+"""Claude Code loads only the first 200 lines of MEMORY.md (official MM1)."""
+
+MEMORY_INDEX_BYTES = 25_000
+"""Claude Code loads only the first 25 KB of MEMORY.md's first 200 lines (official MM1)."""
+
 MAX_IMPORT_DEPTH = 4
 """Claude Code follows ``@path`` imports at most this many hops."""
 

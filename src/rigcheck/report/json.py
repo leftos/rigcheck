@@ -6,14 +6,12 @@ from typing import Any
 
 from rigcheck import __version__
 from rigcheck.engine import count_by_severity
-from rigcheck.model import Artifact, Finding, Kind, Rig
-from rigcheck.parse.markdown import strip_html_comments
-from rigcheck.parse.tokens import estimate
+from rigcheck.model import Artifact, Finding, Rig
+from rigcheck.parse.tokens import INSTRUCTION_CHARS_PER_TOKEN, estimate
+from rigcheck.report.budget import Budget, Listing, loaded_text
 from rigcheck.rules import REGISTRY
 
 SCHEMA_VERSION = 1
-
-_STRIPPED_KINDS = (Kind.INSTRUCTIONS, Kind.NESTED_INSTRUCTIONS)
 
 
 def _posix(path: Path | None) -> str | None:
@@ -36,21 +34,35 @@ def _finding(finding: Finding) -> dict[str, Any]:
 
 
 def _artifact(rig: Rig, artifact: Artifact) -> dict[str, Any]:
-    text = rig.text(artifact.path)
-    if artifact.kind in _STRIPPED_KINDS:
-        text = strip_html_comments(text)
     return {
         "path": artifact.path.as_posix(),
         "kind": artifact.kind.value,
         "layer": artifact.layer.value,
         "load_class": artifact.load_class.value,
         "plugin": artifact.plugin,
-        "tokens_est": estimate(text),
+        "tokens_est": estimate(loaded_text(rig, artifact), INSTRUCTION_CHARS_PER_TOKEN),
     }
 
 
-def render(rig: Rig, findings: list[Finding]) -> str:
-    """Render ranked findings and the rig's artifacts as JSON.
+def _listing(listing: Listing) -> dict[str, Any]:
+    return {"tokens_est": listing.tokens_est, "budget": listing.budget, "entries": listing.entries, "by_layer": dict(listing.by_layer)}
+
+
+def _budget(budget: Budget) -> dict[str, Any]:
+    sources = [
+        {"path": source.path.as_posix(), "layer": source.layer.value, "kind": source.kind.value, "tokens_est": source.tokens_est}
+        for source in budget.every_turn.sources
+    ]
+    return {
+        "window": budget.window,
+        "every_turn": {"total_est": budget.every_turn.total_est, "sources": sources},
+        "skill_listing": _listing(budget.skill_listing),
+        "agent_descriptions": _listing(budget.agent_descriptions),
+    }
+
+
+def render(rig: Rig, findings: list[Finding], budget: Budget) -> str:
+    """Render ranked findings, the context budget and the rig's artifacts as JSON.
 
     Enum values are lower-case strings, paths are POSIX strings, findings keep their rank
     order and artifacts are sorted by layer, then path.
@@ -58,6 +70,7 @@ def render(rig: Rig, findings: list[Finding]) -> str:
     Args:
         rig: The rig the findings are about.
         findings: Ranked findings.
+        budget: The rig's context budget.
 
     Returns:
         The JSON document, ending with a newline.
@@ -71,6 +84,7 @@ def render(rig: Rig, findings: list[Finding]) -> str:
         "repo_root": rig.repo_root.as_posix(),
         "summary": {severity.value: count for severity, count in counts.items()},
         "findings": [_finding(finding) for finding in findings],
+        "budget": _budget(budget),
         "artifacts": [_artifact(rig, artifact) for artifact in artifacts],
     }
     return json.dumps(payload, indent=2) + "\n"
