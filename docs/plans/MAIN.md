@@ -17,8 +17,25 @@ M2 remainder, split by rule module (all read [v1.md](v1.md#rule-catalog-v1-ids-f
 
 ## Next up
 
-- [ ] M3 Component rules: skills, agents, commands, output styles, rules directory. Claude Code loads agent frontmatter that strict YAML rejects (`~/.claude/agents/debugger.md` has an unquoted `: ` in its description), so frontmatter checks must parse as leniently as Claude Code does, or report it as a portability warning and not a load failure
-- [ ] M4 Config rules: hooks, settings (vendored schema), MCP, secrets, duplication
+M3 Component rules: skills, agents, commands, output styles, rules directory, split by module (all read [v1.md](v1.md#rule-catalog-v1-ids-from-docsresearch) and the ids' entries in [official.md](../research/official.md)). M3a, M3b and M3c go first and in that order (hotspots); after M3b every module item edits only its own module, `rules/components.py` and fixtures, so the groups {M3d → M3e}, {M3f → M3g → M3h, M3i, M3j} and {M3k → M3l → M3m} run side by side. One rule has one severity, so an id with split severities becomes several slugs.
+
+Rulings (user, 2026-09-27): reserved names match `claude`/`anthropic` as a whole hyphen-separated part, repo and user layers only; agent tools resolve against a dated table of built-in and deferred tools, and any well-formed `mcp__server__tool` resolves; every M3 rule runs on the plugin layer too, except `skill-name-reserved` and `skill-allowed-tools-broad` (repo only), and `skill-name-mismatch` accepts the `plugin:` prefix; SK27/AG6 ship in M3 (M3n). Settled by the orchestrator: Claude Code's own accept/reject rule for frontmatter is reproduced (pinned by a probe of `claude plugin validate`; where it cannot settle a case, lean to "loads"): Claude Code rejects → the kind's invalid/skipped error, Claude Code loads but strict YAML rejects → `frontmatter-yaml-nonstandard` warn, evidence `official:SK1`, `official:AG1` and the probe written up in `docs/research/`; a wrong-case or kebab/snake variant of a known key is reported under the kind's `*-key-unknown` with "did you mean"; booleans read true/yes/on/1 and their opposites through one `as_bool`; an agents-folder file with no `---` at all is documentation and silent; `rule-glob-unmatched` checks repo-layer rules only, against `git ls-files -co --exclude-standard`, picomatch-style; OS2 warns only when `keep-coding-instructions` is absent; SK22/SK24 ship only their deterministic parts (literal `!`, relative path in injection, `$N` in prose, unused argument), and "not covered by `allowed-tools`" waits for M4's permission grammar.
+
+- [ ] M3a Claude Code–compatible frontmatter (`parse/frontmatter.py`, `discover._rule_load_class`, `report/budget.py`): probe `claude plugin validate` to pin the fallback that loads `agents/debugger.md` and `skills/debug-live` but rejects `skills/friction-review`, then one loader returning data, strict error, Claude Code error and key lines, plus `as_bool`
+- [ ] M3b Component scaffold: `rules/components.py` (artifacts by kind, cached parse, per-kind key tables, `frontmatter-yaml-nonstandard`) and stub modules `skills.py`, `commands.py`, `agents.py`, `rules_dir.py`, `output_styles.py` imported once in `rules/__init__.py`
+- [ ] M3c Discovery and fixture gaps (`discover.py`, `tests/test_rule_catalog.py`): plugin output styles, symlinked rule folders, external scoped rules marked not loaded, plugin-layer fixture support
+- [ ] M3d Rules dir: `rule-key-unknown`, `rule-frontmatter-invalid`, `rule-external-scoped` (RL1, RL2, RL7)
+- [ ] M3e Rule globs in `parse/globs.py`: `rule-glob-invalid`, `rule-glob-unmatched` (RL3)
+- [ ] M3f Skill frontmatter, on skills and commands: `skill-frontmatter-misplaced`, `skill-frontmatter-invalid`, `skill-key-unknown`, `skill-description-missing`, `skill-description-truncated`, `skill-unreachable` (SK1, SK2, SK4, SK19)
+- [ ] M3g Skill names and options: `skill-name-mismatch`, `skill-name-reserved`, `skill-fork-option-ignored`, `skill-agent-missing`, `skill-allowed-tools-broad` (SK8, SK20, SK21)
+- [ ] M3h Commands: `command-key-ignored` (SK30)
+- [ ] M3i Skill links: `skill-link-broken`, `skill-link-too-deep`, `skill-link-outside`, `skill-file-unreferenced` (SK11); waits on the `references.py` backlog fixes, since it reuses `reference_path`
+- [ ] M3j Skill injection and arguments (`parse/markdown.py`): `skill-injection-literal`, `skill-injection-relative-path`, `skill-dollar-digit`, `skill-argument-unused` (SK22–24)
+- [ ] M3k Agents: `agent-skipped`, `agent-key-unknown`, `agent-value-invalid` (AG1–3); `debugger.md` must not be skipped
+- [ ] M3l Agent tools and skills: `agent-tools-unresolved`, `agent-tool-unknown`, `agent-disallowed-specifier`, `agent-skill-missing`, `agent-skill-not-preloadable`, `agent-name-collision` (AG4, AG8, AG11)
+- [ ] M3m Plugin agents and output styles: `agent-key-ignored-in-plugin`, `output-style-key-unknown`, `output-style-drops-coding` (AG5, OS1, OS2)
+- [ ] M3n Budget findings: `skill-listing-over-budget`, `agent-descriptions-over-budget` (SK27, AG6), with the `--window` value carried on the Rig
+- [ ] M4 Config rules: hooks, settings (vendored schema), MCP, secrets, duplication. Waits on M3a and M3b: the frontmatter hook checks and the secrets scan use their loader and key tables
 - [ ] M5 Suppressions, advice pack, `explain`, `brief`
 - [ ] M6 `--deep` checks via `claude -p`
 - [ ] M7 House pack, the `rigcheck` Claude Code skill, install docs
