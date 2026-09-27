@@ -116,6 +116,7 @@ class _Builder:
     repo_root: Path
     home: Path
     in_git: bool
+    home_target: bool
     artifacts: dict[str, Artifact] = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)
 
@@ -172,7 +173,7 @@ def _chain_files(b: _Builder, names: tuple[str, ...]) -> list[Path]:
 
 def _add_chain(b: _Builder) -> tuple[list[Artifact], set[str]]:
     """Add the always-on instruction files; return the loaded roots and the shadowed AGENTS.md keys."""
-    chain = _chain_files(b, (*CLAUDE_FAMILY, AGENTS_MD))
+    chain = [] if b.home_target else _chain_files(b, (*CLAUDE_FAMILY, AGENTS_MD))
     has_claude = any(path.name != AGENTS_MD for path in chain)
     roots: list[Artifact] = []
     shadowed: set[str] = set()
@@ -185,7 +186,7 @@ def _add_chain(b: _Builder) -> tuple[list[Artifact], set[str]]:
             roots.append(Artifact(path, Kind.INSTRUCTIONS, Layer.REPO, LoadClass.NOT_LOADED))
         else:
             roots.append(Artifact(path, Kind.INSTRUCTIONS, Layer.REPO, _load_class(path)))
-    for path in _chain_files(b, IGNORED_BY_CLAUDE):
+    for path in () if b.home_target else _chain_files(b, IGNORED_BY_CLAUDE):
         b.add(Artifact(path, Kind.INSTRUCTIONS, Layer.REPO, LoadClass.NOT_LOADED))
     for artifact in roots:
         b.add(artifact)
@@ -243,6 +244,8 @@ def _repo_claude_md(b: _Builder) -> Iterator[Path]:
 
 
 def _add_nested(b: _Builder) -> None:
+    if b.home_target:
+        return
     for path in _repo_claude_md(b):
         if _is_below(path.parent, b.target):
             b.add(Artifact(path, Kind.NESTED_INSTRUCTIONS, Layer.REPO, LoadClass.ON_DEMAND))
@@ -272,7 +275,7 @@ def _add_claude_dirs(b: _Builder) -> None:
         _add_claude_dir(b, repo_dir, Layer.REPO)
     _add_claude_dir(b, user_dir, Layer.USER)
     mcp = b.repo_root / ".mcp.json"
-    if mcp.is_file():
+    if mcp.is_file() and not b.home_target:
         b.add(Artifact(mcp, Kind.MCP_CONFIG, Layer.REPO, LoadClass.CONFIG))
 
 
@@ -357,6 +360,7 @@ def discover(target: Path, home: Path) -> Rig:
 
     Problems with unreadable or malformed inputs are collected in ``Rig.problems``; discovery never raises for them.
     Only this project's own memory folder is read, and ``~/.claude.json`` is never read.
+    When ``target`` is the home directory itself, only ``~/.claude`` is discovered: no repo-layer chain at home and no nested ``CLAUDE.md`` walk.
 
     Args:
         target: The directory Claude Code would start in.
@@ -366,7 +370,7 @@ def discover(target: Path, home: Path) -> Rig:
         The rig: every artifact with its layer and load class.
     """
     repo_root, in_git = _repo_root(target)
-    b = _Builder(target=target, repo_root=repo_root, home=home, in_git=in_git)
+    b = _Builder(target=target, repo_root=repo_root, home=home, in_git=in_git, home_target=path_key(target) == path_key(home))
     roots, shadowed = _add_chain(b)
     _follow_imports(b, roots, shadowed)
     _add_nested(b)

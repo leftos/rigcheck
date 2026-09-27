@@ -247,6 +247,32 @@ def test_nested_claude_md_is_on_demand_and_skips_vendor_dirs(workspace: Workspac
     assert nested_artifacts[0].load_class is LoadClass.ON_DEMAND
 
 
+def test_home_target_reads_only_the_claude_folder(workspace: Workspace) -> None:
+    write(workspace.home / "CLAUDE.md", "# Home\n")
+    write(workspace.home / "AGENTS.md", "# Agents\n")
+    write(workspace.home / ".mcp.json", "{}\n")
+    write(workspace.home / "proj" / "CLAUDE.md", "# Proj\n")
+    write(workspace.home / "AppData" / "x" / "CLAUDE.md", "# AppData\n")
+    user_root = write(workspace.home / ".claude" / "CLAUDE.md", "# User\n")
+    rule = write(workspace.home / ".claude" / "rules" / "r.md", "Rule.\n")
+    rig = discover(workspace.home, workspace.home)
+    assert [artifact for artifact in rig.artifacts if artifact.layer is Layer.REPO] == []
+    assert _artifact(rig, user_root).kind is Kind.INSTRUCTIONS
+    assert _artifact(rig, user_root).layer is Layer.USER
+    assert _artifact(rig, rule).layer is Layer.USER
+    assert [artifact for artifact in rig.artifacts if artifact.kind is Kind.NESTED_INSTRUCTIONS] == []
+
+
+def test_home_subfolder_still_walks_nested(workspace: Workspace) -> None:
+    notes = workspace.home / "notes"
+    write(notes / "CLAUDE.md", "# Notes\n")
+    nested = write(notes / "sub" / "CLAUDE.md", "# Sub\n")
+    rig = discover(notes, workspace.home)
+    nested_artifacts = [artifact for artifact in rig.artifacts if artifact.kind is Kind.NESTED_INSTRUCTIONS]
+    assert [artifact.path for artifact in nested_artifacts] == [nested]
+    assert nested_artifacts[0].layer is Layer.REPO
+
+
 def test_walk_does_not_enter_junctions(workspace: Workspace) -> None:
     if os.name != "nt":
         pytest.skip("junctions exist only on Windows")
