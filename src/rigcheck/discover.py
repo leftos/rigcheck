@@ -42,6 +42,7 @@ _PLUGIN_FILES = (
     ("skills/*/SKILL.md", Kind.SKILL, LoadClass.ON_INVOKE),
     ("agents/*.md", Kind.AGENT, LoadClass.ON_INVOKE),
     ("commands/*.md", Kind.COMMAND, LoadClass.ON_INVOKE),
+    ("output-styles/*.md", Kind.OUTPUT_STYLE, LoadClass.ON_DEMAND),
     ("hooks/hooks.json", Kind.HOOKS_CONFIG, LoadClass.CONFIG),
     (".mcp.json", Kind.MCP_CONFIG, LoadClass.CONFIG),
     (".claude-plugin/plugin.json", Kind.PLUGIN_MANIFEST, LoadClass.CONFIG),
@@ -274,20 +275,67 @@ def _add_nested(b: _Builder) -> None:
             b.add(Artifact(path, Kind.NESTED_INSTRUCTIONS, Layer.REPO, LoadClass.ON_DEMAND))
 
 
-def _rule_load_class(b: _Builder, path: Path) -> LoadClass:
+def _resolved_key(path: Path) -> str:
+    try:
+        return path_key(path.resolve())
+    except OSError:
+        return path_key(path)
+
+
+def _is_outside(path: Path, root: Path) -> bool:
+    """Return True when ``path`` resolves outside ``root``, which is how a linked rule leaves the project."""
+    return not Path(_resolved_key(path)).is_relative_to(Path(_resolved_key(root)))
+
+
+def _rule_files(b: _Builder, base: Path) -> list[Path]:
+    """Return the ``*.md`` files under ``base/rules`` in sorted order, following each linked folder once.
+
+    Rules reached through a linked folder are loadable, so the walk follows folder symlinks; a folder whose
+    resolved path was already claimed is skipped, which lists a linked folder once and terminates a link cycle.
+    """
+    root = base / "rules"
+    if not root.is_dir():
+        return []
+
+    def on_error(error: OSError) -> None:
+        b.problems.append(f"cannot list {error.filename}: {error.strerror or error}")
+
+    def claim(directory: Path, names: list[str]) -> list[str]:
+        kept = []
+        for name in sorted(names):
+            key = _resolved_key(Path(directory, name))
+            if key in visited:
+                continue
+            visited.add(key)
+            kept.append(name)
+        return kept
+
+    found: list[Path] = []
+    visited: set[str] = set()
+    for directory, subdirs, files in os.walk(root, followlinks=True, onerror=on_error):
+        visited.add(_resolved_key(Path(directory)))
+        subdirs[:] = claim(Path(directory), subdirs)
+        found.extend(Path(directory, name) for name in files if name.endswith(".md"))
+    return sorted(found)
+
+
+def _rule_load_class(b: _Builder, path: Path, layer: Layer, repo_root: Path) -> LoadClass:
     if not _loads(path):
         return LoadClass.NOT_LOADED
     text = b.read(path)
     parsed = frontmatter.parse(text or "")
     if parsed.data is not None and "paths" in parsed.data:
+        # RL7: a rule reached through a link out of the project loads only while it carries no `paths`.
+        if layer is Layer.REPO and _is_outside(path, repo_root):
+            return LoadClass.NOT_LOADED
         return LoadClass.ON_DEMAND
     return LoadClass.EVERY_TURN
 
 
 def _add_claude_dir(b: _Builder, base: Path, layer: Layer) -> None:
-    for path in sorted(base.glob("rules/**/*.md")):
+    for path in _rule_files(b, base):
         if is_file_like(path):
-            b.add(Artifact(path, Kind.RULE, layer, _rule_load_class(b, path)))
+            b.add(Artifact(path, Kind.RULE, layer, _rule_load_class(b, path, layer, b.repo_root)))
     b.add_glob(base, _CLAUDE_DIR_FILES, layer, None)
 
 
