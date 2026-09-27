@@ -1,5 +1,6 @@
 """Every rule has evidence, a failing fixture and a passing fixture, and behaves on both."""
 
+import json
 import os
 import shutil
 from collections.abc import Callable
@@ -7,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from rigcheck.discover import MAX_BYTES, memory_dir
+from rigcheck.discover import MAX_BYTES, discover, memory_dir
+from rigcheck.model import Kind, Layer
 from rigcheck.rules import REGISTRY
 from support import FIXTURES, Workspace, git_add, run_json, symlink_or_skip, write
 
@@ -30,12 +32,20 @@ RUNTIME_SETUP: dict[tuple[str, str], Callable[[Path], None]] = {
 }
 
 
+def _resolve_home_placeholders(workspace: Workspace) -> None:
+    installed = workspace.home / ".claude" / "plugins" / "installed_plugins.json"
+    if not installed.is_file():
+        return
+    write(installed, installed.read_text(encoding="utf-8").replace("{HOME}", workspace.home.as_posix()))
+
+
 def _prepare(rule_id: str, variant: str, workspace: Workspace) -> Path:
     fixture = FIXTURES / rule_id
     for home_source in (fixture / variant / "home", fixture / "home"):
         if home_source.is_dir():
             shutil.copytree(home_source, workspace.home, dirs_exist_ok=True)
             break
+    _resolve_home_placeholders(workspace)
     rig = workspace.home / "work" / variant
     excluded = ["home", "memory"]
     shutil.copytree(fixture / variant, rig, ignore=lambda directory, _names: excluded if Path(directory) == fixture / variant else [])
@@ -49,6 +59,21 @@ def _prepare(rule_id: str, variant: str, workspace: Workspace) -> Path:
     if setup is not None:
         setup(rig)
     return rig
+
+
+def test_prepare_resolves_plugin_install_paths(workspace: Workspace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fixtures = tmp_path / "catalog-fixtures"
+    home = fixtures / "demo-rule" / "bad" / "home"
+    write(home / ".claude" / "settings.json", '{"enabledPlugins": {"demo@local": true}}\n')
+    installed = {"version": 2, "plugins": {"demo@local": [{"scope": "user", "installPath": "{HOME}/.claude/plugins/cache/demo"}]}}
+    write(home / ".claude" / "plugins" / "installed_plugins.json", json.dumps(installed))
+    write(home / ".claude" / "plugins" / "cache" / "demo" / "skills" / "x" / "SKILL.md", "---\nname: x\n---\n")
+    monkeypatch.setattr("test_rule_catalog.FIXTURES", fixtures)
+    rig = _prepare("demo-rule", "bad", workspace)
+    artifacts = [artifact for artifact in discover(rig, workspace.home).artifacts if artifact.layer is Layer.PLUGIN]
+    expected = workspace.home / ".claude" / "plugins" / "cache" / "demo" / "skills" / "x" / "SKILL.md"
+    assert [artifact.path for artifact in artifacts] == [expected]
+    assert artifacts[0].kind is Kind.SKILL
 
 
 @pytest.mark.parametrize("rule_id", sorted(REGISTRY))

@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -9,9 +10,10 @@ from rigcheck import engine
 from rigcheck.discover import discover, encode_project, memory_dir
 from rigcheck.model import Artifact, Kind, Layer, LoadClass, Rig
 from rigcheck.rules import REGISTRY
-from support import Workspace, write
+from support import Workspace, symlink_or_skip, write
 
 PLUGIN = "tools@market"
+UNC_RULES = r"\\server\share\rules" if os.name == "nt" else "//server/share/rules"
 
 
 def _by_name(rig: Rig) -> dict[str, Artifact]:
@@ -27,6 +29,7 @@ def _install_plugin(workspace: Workspace, entry: dict[str, str]) -> Path:
     write(install / "skills" / "lint" / "SKILL.md", "---\nname: lint\ndescription: Lint.\n---\n")
     write(install / "agents" / "reviewer.md", "---\nname: reviewer\n---\n")
     write(install / "commands" / "go.md", "Go.\n")
+    write(install / "output-styles" / "terse.md", "Terse.\n")
     write(install / "hooks" / "hooks.json", "{}\n")
     write(install / ".mcp.json", "{}\n")
     write(install / ".claude-plugin" / "plugin.json", '{"name": "tools"}\n')
@@ -49,8 +52,17 @@ def test_user_enabled_plugin_contributes_its_components(workspace: Workspace) ->
     _enable(workspace.home / ".claude" / "settings.json", enabled=True)
     artifacts = _plugin_artifacts(discover(repo, workspace.home))
     kinds = sorted(artifact.kind.value for artifact in artifacts)
-    assert kinds == ["agent", "command", "hooks-config", "mcp-config", "plugin-manifest", "skill"]
+    assert kinds == ["agent", "command", "hooks-config", "mcp-config", "output-style", "plugin-manifest", "skill"]
     assert {artifact.plugin for artifact in artifacts} == {PLUGIN}
+
+
+def test_plugin_output_styles_are_discovered_on_demand(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    install = _install_plugin(workspace, {"scope": "user"})
+    _enable(workspace.home / ".claude" / "settings.json", enabled=True)
+    artifact = _artifact(discover(repo, workspace.home), install / "output-styles" / "terse.md")
+    assert (artifact.kind, artifact.layer, artifact.load_class) == (Kind.OUTPUT_STYLE, Layer.PLUGIN, LoadClass.ON_DEMAND)
+    assert artifact.plugin == PLUGIN
 
 
 def test_project_settings_disable_a_user_enabled_plugin(workspace: Workspace) -> None:
@@ -142,6 +154,174 @@ def test_rules_load_every_turn_unless_path_scoped(workspace: Workspace) -> None:
     assert artifacts["broken.md"].load_class is LoadClass.EVERY_TURN
     assert artifacts["nonstandard.md"].load_class is LoadClass.ON_DEMAND
     assert (artifacts["mine.md"].kind, artifacts["mine.md"].layer) == (Kind.RULE, Layer.USER)
+
+
+def _rule_link(repo: Path, name: str, target: Path) -> Path:
+    link = repo / ".claude" / "rules" / name
+    link.parent.mkdir(parents=True, exist_ok=True)
+    symlink_or_skip(link, os.fspath(target))
+    return link
+
+
+def test_rule_folder_link_outside_repo_scoped_by_paths_is_not_loaded(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    external = write(workspace.home / "elsewhere" / "rules" / "a.md", "---\npaths:\n  - src/**\n---\nScoped.\n")
+    _rule_link(repo, "shared", external.parent)
+    artifact = _artifact(discover(repo, workspace.home), repo / ".claude" / "rules" / "shared" / "a.md")
+    assert (artifact.layer, artifact.load_class) == (Layer.REPO, LoadClass.NOT_LOADED)
+
+
+def test_rule_folder_link_outside_repo_without_paths_loads_every_turn(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    external = write(workspace.home / "elsewhere" / "rules" / "b.md", "No frontmatter.\n")
+    _rule_link(repo, "shared", external.parent)
+    artifact = _artifact(discover(repo, workspace.home), repo / ".claude" / "rules" / "shared" / "b.md")
+    assert (artifact.layer, artifact.load_class) == (Layer.REPO, LoadClass.EVERY_TURN)
+
+
+def test_rule_folder_link_inside_repo_keeps_paths_scoping(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    write(repo / "docs" / "rules" / "c.md", "---\npaths:\n  - src/**\n---\nScoped.\n")
+    _rule_link(repo, "local", repo / "docs" / "rules")
+    artifact = _artifact(discover(repo, workspace.home), repo / ".claude" / "rules" / "local" / "c.md")
+    assert (artifact.layer, artifact.load_class) == (Layer.REPO, LoadClass.ON_DEMAND)
+
+
+def test_rule_folder_link_cycle_terminates_and_lists_each_file_once(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    real = write(repo / ".claude" / "rules" / "real.md", "Real.\n")
+    _rule_link(repo, "loop", repo / ".claude" / "rules")
+    rules = [artifact for artifact in discover(repo, workspace.home).artifacts if artifact.kind is Kind.RULE and artifact.layer is Layer.REPO]
+    assert [artifact.path for artifact in rules] == [real]
+
+
+def test_rule_folder_link_beside_its_target_lists_the_files_once(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    real = write(repo / ".claude" / "rules" / "a" / "x.md", "Real.\n")
+    _rule_link(repo, "b", real.parent)
+    rules = [artifact for artifact in discover(repo, workspace.home).artifacts if artifact.kind is Kind.RULE and artifact.layer is Layer.REPO]
+    assert [artifact.path for artifact in rules] == [real]
+
+
+def _repo_rule_paths(rig: Rig) -> list[Path]:
+    return [artifact.path for artifact in rig.artifacts if artifact.kind is Kind.RULE and artifact.layer is Layer.REPO]
+
+
+def test_rule_folder_link_to_a_subfolder_of_another_links_target_lists_each_file_once(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    outer = write(workspace.home / "elsewhere" / "g.md", "Outer.\n")
+    inner = write(workspace.home / "elsewhere" / "sub" / "f.md", "Inner.\n")
+    _rule_link(repo, "a", outer.parent)
+    _rule_link(repo, "b", inner.parent)
+    paths = _repo_rule_paths(discover(repo, workspace.home))
+    assert sorted(path.resolve() for path in paths) == sorted([outer.resolve(), inner.resolve()])
+    assert repo / ".claude" / "rules" / "b" / "f.md" in paths
+
+
+def test_rule_folder_link_to_a_parent_of_another_links_target_lists_each_file_once(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    outer = write(workspace.home / "elsewhere" / "g.md", "Outer.\n")
+    inner = write(workspace.home / "elsewhere" / "sub" / "f.md", "Inner.\n")
+    _rule_link(repo, "a", inner.parent)
+    _rule_link(repo, "b", outer.parent)
+    paths = _repo_rule_paths(discover(repo, workspace.home))
+    assert sorted(path.resolve() for path in paths) == sorted([outer.resolve(), inner.resolve()])
+    assert repo / ".claude" / "rules" / "a" / "f.md" in paths
+
+
+@pytest.mark.skipif(os.name != "nt", reason="junctions exist only on Windows")
+def test_rule_folder_junction_to_a_subfolder_of_another_junctions_target_lists_each_file_once(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    outer = write(workspace.home / "elsewhere" / "g.md", "Outer.\n")
+    inner = write(workspace.home / "elsewhere" / "sub" / "f.md", "Inner.\n")
+    _junction_or_skip(repo / ".claude" / "rules" / "a", outer.parent)
+    _junction_or_skip(repo / ".claude" / "rules" / "b", inner.parent)
+    paths = _repo_rule_paths(_discover_within(repo, workspace.home))
+    assert sorted(path.resolve() for path in paths) == sorted([outer.resolve(), inner.resolve()])
+    assert repo / ".claude" / "rules" / "b" / "f.md" in paths
+
+
+def test_rule_file_link_outside_repo_scoped_by_paths_is_not_loaded(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    external = write(workspace.home / "elsewhere" / "d.md", "---\npaths:\n  - src/**\n---\nScoped.\n")
+    _rule_link(repo, "d.md", external)
+    artifact = _artifact(discover(repo, workspace.home), repo / ".claude" / "rules" / "d.md")
+    assert (artifact.layer, artifact.load_class) == (Layer.REPO, LoadClass.NOT_LOADED)
+
+
+def _junction_or_skip(link: Path, target: Path) -> None:
+    link.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], capture_output=True, check=False)  # noqa: S603, S607 - fixed test command
+    if result.returncode != 0:
+        pytest.skip("cannot create a junction here")
+
+
+def _discover_within(target: Path, home: Path, timeout: float = 10.0) -> Rig:
+    """Discover in a daemon thread, so a walk that loops fails the test instead of hanging it."""
+    result: list[Rig] = []
+    thread = threading.Thread(target=lambda: result.append(discover(target, home)), daemon=True)
+    thread.start()
+    thread.join(timeout)
+    assert not thread.is_alive(), f"discovery did not finish within {timeout}s"
+    return result[0]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="junctions exist only on Windows")
+def test_rule_folder_junction_cycle_terminates(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    real = write(repo / ".claude" / "rules" / "x.md", "Real.\n")
+    _junction_or_skip(repo / ".claude" / "rules" / "loop", repo / ".claude" / "rules")
+    rig = _discover_within(repo, workspace.home)
+    rules = [artifact for artifact in rig.artifacts if artifact.kind is Kind.RULE and artifact.layer is Layer.REPO]
+    assert [artifact.path for artifact in rules] == [real]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="junctions exist only on Windows")
+def test_rule_folder_junction_outside_repo_scoped_by_paths_is_not_loaded(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    external = write(workspace.home / "elsewhere" / "rules" / "a.md", "---\npaths:\n  - src/**\n---\nScoped.\n")
+    _junction_or_skip(repo / ".claude" / "rules" / "shared", external.parent)
+    artifact = _artifact(discover(repo, workspace.home), repo / ".claude" / "rules" / "shared" / "a.md")
+    assert (artifact.layer, artifact.load_class) == (Layer.REPO, LoadClass.NOT_LOADED)
+
+
+def test_rule_folder_link_to_a_real_folder_loses_to_it(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    real = write(repo / ".claude" / "rules" / "z" / "x.md", "Real.\n")
+    _rule_link(repo, "a", real.parent)
+    rules = [artifact for artifact in discover(repo, workspace.home).artifacts if artifact.kind is Kind.RULE and artifact.layer is Layer.REPO]
+    assert [artifact.path for artifact in rules] == [real]
+
+
+def test_rule_folder_link_nested_below_a_real_folder_loses_to_it(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    real = write(repo / ".claude" / "rules" / "b" / "c" / "y.md", "Real.\n")
+    _rule_link(repo, "a/l", real.parent)
+    rules = [artifact for artifact in discover(repo, workspace.home).artifacts if artifact.kind is Kind.RULE and artifact.layer is Layer.REPO]
+    assert [artifact.path for artifact in rules] == [real]
+
+
+def test_rule_folder_link_to_a_network_path_is_reported_not_loaded(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    link = _rule_link(repo, "shared", Path(UNC_RULES))
+    rig = discover(repo, workspace.home)
+    artifact = _artifact(rig, link)
+    assert (artifact.kind, artifact.layer, artifact.load_class) == (Kind.RULE, Layer.REPO, LoadClass.NOT_LOADED)
+    rules = [item for item in rig.artifacts if item.kind is Kind.RULE and item.layer is Layer.REPO]
+    assert [item.path for item in rules] == [link]
+    findings = engine.run(rig, REGISTRY.values())
+    assert any(finding.rule_id == "unc-symlink" and finding.path == link for finding in findings)
+
+
+def test_claude_rules_dir_link_to_a_network_path_is_reported_not_loaded(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    (repo / ".claude").mkdir(parents=True, exist_ok=True)
+    link = repo / ".claude" / "rules"
+    symlink_or_skip(link, UNC_RULES)
+    rig = discover(repo, workspace.home)
+    artifact = _artifact(rig, link)
+    assert (artifact.kind, artifact.layer, artifact.load_class) == (Kind.RULE, Layer.REPO, LoadClass.NOT_LOADED)
+    assert rig.problems == ()
 
 
 def test_claude_dir_components(workspace: Workspace) -> None:
