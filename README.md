@@ -10,7 +10,7 @@ Status: early development. The first rule family (instruction files and `@import
 uv run rigcheck check [PATH] [--format text|json] [--home DIR]
 ```
 
-Checks the setup Claude Code loads for `PATH` (default: the current directory): the repo's instruction files and `.claude/` folder, your `~/.claude`, enabled plugins, and that project's own memory folder. The text report groups findings by layer; `--format json` gives a stable schema for agents. Exit status: 0 with no error findings, 1 with at least one, 2 on a usage error.
+Checks the setup Claude Code loads for `PATH` (default: the current directory): the repo's instruction files and `.claude/` folder, your `~/.claude`, enabled plugins, and that project's own memory folder. `rigcheck check ~` checks only `~/.claude`, its plugins and its memory. The text report groups findings by layer; `--format json` gives a stable schema for agents. Exit status: 0 with no error findings, 1 with at least one, 2 on a usage error.
 
 ## Development
 
