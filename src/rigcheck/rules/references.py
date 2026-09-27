@@ -64,7 +64,7 @@ def _names_no_file(token: str) -> bool:
         return True
     if "..." in token or "\N{HORIZONTAL ELLIPSIS}" in token or _PLACEHOLDER_CHARS.intersection(token):
         return True
-    return _HOST.match(_first_segment(token)) is not None
+    return "/" in token.removeprefix("./") and _HOST.match(_first_segment(token)) is not None
 
 
 def reference_path(reference: Reference) -> str | None:
@@ -72,11 +72,14 @@ def reference_path(reference: Reference) -> str | None:
 
     The text must have no whitespace or leading ``#``; links lose their ``#fragment`` and ``?query``
     and are URL-decoded; code spans lose a ``#fragment``, and a span that is one ``NAME=value``
-    assignment is judged by its value. A trailing ``:line`` or ``:line:column`` and a pytest ``::test``
-    suffix are dropped, so ``notes.md:12`` names ``notes.md`` and ``tel:5550100`` names ``tel``. What
-    remains names no file when it starts with a URL scheme such as ``https:``, ``mailto:`` or ``tel:``
-    (a single drive letter is not a scheme), holds a glob or placeholder character or ``...`` or ``…``,
-    or its first segment is a host name such as ``github.com``.
+    assignment is judged by its value. A token that starts with a scheme holding no dot names no file,
+    and that is decided before the ``:line`` suffix is dropped, so ``tel:5550100`` is not read as the
+    file ``tel`` while ``notes.md:12`` names ``notes.md``. What then remains has a trailing ``:line``
+    or ``:line:column`` and a pytest ``::test`` suffix dropped, and names no file when it starts with a
+    URL scheme such as ``https:`` (a single drive letter is not a scheme), holds a glob or placeholder
+    character or ``...`` or ``…``, or a ``/`` follows a first segment that is a host name such as
+    ``github.com``. A first segment with no ``/`` after it is a file, so ``deploy.sh`` and
+    ``example.com`` name files.
 
     Args:
         reference: A reference from :func:`rigcheck.parse.markdown.find_references`.
@@ -92,7 +95,11 @@ def reference_path(reference: Reference) -> str | None:
         return None
     if token is None:
         return None
-    token = _LOCATION.sub("", token.split("::", 1)[0]).replace("\\", "/")
+    head = token.split("::", 1)[0]
+    scheme = _SCHEME.match(head)
+    if scheme is not None and "." not in scheme.group(0):
+        return None
+    token = _LOCATION.sub("", head).replace("\\", "/")
     return None if _names_no_file(token) else token
 
 
@@ -150,11 +157,17 @@ def _stale(paths: list[Path]) -> bool:
 
 
 def _missing_path_message(rig: Rig, artifact: Artifact, reference: Reference, token: str) -> str | None:
+    """Return the message for a path that names no file, or None when it exists or is not checkable."""
     if token.startswith("~/"):
         return f"{reference.raw} does not exist in the home folder" if _stale([_resolved(rig.home, token[2:])]) else None
-    if artifact.layer is not Layer.REPO or not _stale(path_bases(token, artifact.path.parent, rig.repo_root)):
+    if artifact.layer is not Layer.REPO:
         return None
-    return f"{reference.raw} does not exist (looked beside {artifact.path.name} and at the repo root)"
+    bases = path_bases(token, artifact.path.parent, rig.repo_root)
+    if bases:
+        return f"{reference.raw} does not exist (looked beside {artifact.path.name} and at the repo root)" if _stale(bases) else None
+    if token.startswith("../") and _stale([_resolved(artifact.path.parent, token)]):
+        return f"{reference.raw} does not exist (looked beside {artifact.path.name}, outside the repo)"
+    return None
 
 
 @rule(

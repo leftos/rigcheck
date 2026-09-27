@@ -3,7 +3,14 @@ from pathlib import Path
 import pytest
 
 from rigcheck.parse.markdown import Reference, find_references
-from rigcheck.rules.references import invocations, justfile_names, makefile_names, path_bases, path_candidate
+from rigcheck.rules.references import (
+    invocations,
+    justfile_names,
+    makefile_names,
+    path_bases,
+    path_candidate,
+    reference_path,
+)
 from support import Workspace, git_add, run_json, write
 
 
@@ -74,6 +81,26 @@ def test_path_candidate_ignores_fences() -> None:
     assert path_candidate(Reference(line=1, raw="docs/a.md", source="fence", lang="")) is None
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("deploy.sh", "deploy.sh"),
+        ("notes.org", "notes.org"),
+        ("example.com", "example.com"),
+        ("github.com/leftos/rigcheck", None),
+        ("docs.example.io/a", None),
+        ("tel:5550100", None),
+        ("mailto:a@b.com", None),
+        ("vscode://file/x", None),
+        ("gone.md:12", "gone.md"),
+        ("a.md:12:3", "a.md"),
+        ("C:/x/y.md", "C:/x/y.md"),
+    ],
+)
+def test_reference_path(raw: str, expected: str | None) -> None:
+    assert reference_path(Reference(line=1, raw=raw, source="link", lang="")) == expected
+
+
 def test_backslash_link_from_markdown_is_normalised() -> None:
     [reference] = find_references("[setup](tools\\\\setup.ps1)\n")
     assert path_candidate(reference) == "tools/setup.ps1"
@@ -106,6 +133,35 @@ def test_path_rule_checks_only_home_paths_in_user_files(workspace: Workspace, ca
     write(rig / "docs" / "other.md", "x\n")
     write(workspace.home / ".claude" / "CLAUDE.md", "`docs/gone.md` `./gone.md` `~/.claude/gone.md`\n")
     assert _path_messages(capsys, rig, workspace.home) == ["~/.claude/gone.md does not exist in the home folder"]
+
+
+def test_path_rule_flags_a_parent_path_that_leaves_the_repo(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rig = workspace.rig()
+    write(rig.parent / "sib" / "docs" / "other.md", "x\n")
+    write(rig / "CLAUDE.md", "`../sib/docs/x.md`\n")
+    assert _path_messages(capsys, rig, workspace.home) == ["../sib/docs/x.md does not exist (looked beside CLAUDE.md, outside the repo)"]
+
+
+def test_path_rule_accepts_a_parent_path_that_exists_outside_the_repo(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rig = workspace.rig()
+    write(rig.parent / "sib" / "docs" / "x.md", "x\n")
+    write(rig / "CLAUDE.md", "`../sib/docs/x.md`\n")
+    assert _path_messages(capsys, rig, workspace.home) == []
+
+
+def test_path_rule_skips_a_parent_path_whose_folder_is_gone(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rig = workspace.rig()
+    write(rig / "CLAUDE.md", "`../sib/docs/x.md`\n")
+    assert _path_messages(capsys, rig, workspace.home) == []
+
+
+def test_path_rule_keeps_the_repo_message_for_a_parent_path_inside_the_repo(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rig = workspace.rig()
+    write(rig / "CLAUDE.md", "# Project\n")
+    write(rig / "docs" / "other.md", "x\n")
+    write(rig / "sub" / "CLAUDE.md", "`../docs/a.md`\n")
+    git_add(rig, ["CLAUDE.md", "sub/CLAUDE.md"])
+    assert _path_messages(capsys, rig, workspace.home) == ["../docs/a.md does not exist (looked beside CLAUDE.md and at the repo root)"]
 
 
 def test_path_bases_skip_what_escapes_the_repo(tmp_path: Path) -> None:
