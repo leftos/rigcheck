@@ -308,14 +308,13 @@ def _rule_files(b: _Builder, base: Path) -> list[Path]:
 
     real = _real_rule_dirs(root, on_error)
     found: list[Path] = []
-    visited: set[str] = set()
-    pending = [root]
+    claimed: set[str] = set()
+    pending = [(root, False)]
     while pending:
-        current = pending.pop()
-        visited.add(_resolved_key(current))
+        current, linked = pending.pop()
         folders, paths = _list_rules_dir(current, on_error)
         found.extend(path for path in paths if path.name.endswith(".md") or unc_link_target(path) is not None)
-        walked = _walkable_rule_folders(folders, real, visited)
+        walked = _walkable_rule_folders(folders, real, claimed, linked=linked)
         pending.extend(reversed(walked))
     return sorted(found)
 
@@ -370,21 +369,34 @@ def _real_rule_dirs(root: Path, on_error: Callable[[OSError], None]) -> set[str]
     return keys
 
 
-def _claim_link(folder: Path, real: set[str], visited: set[str]) -> bool:
-    """Claim ``folder``, a link to a folder: True when it is walked, False when a real folder or another link owns it."""
+def _claim_folder(folder: Path, real: set[str], claimed: set[str]) -> bool:
+    """Claim ``folder``, reached through a link: True when it is walked, False when a real folder or an earlier claim owns it."""
     key = _resolved_key(folder)
-    if key in real or key in visited:
+    if key in real or key in claimed:
         return False
-    visited.add(key)
+    claimed.add(key)
     return True
 
 
-def _walkable_rule_folders(folders: list[Path], real: set[str], visited: set[str]) -> list[Path]:
-    """Return the subfolders to walk: every real folder, plus each folder link no real folder or earlier link owns."""
-    walked: list[Path] = []
+def _walkable_rule_folders(folders: list[Path], real: set[str], claimed: set[str], *, linked: bool) -> list[tuple[Path, bool]]:
+    """Return the subfolders of one listed folder to walk, each paired with whether it is reached through a link.
+
+    Args:
+        folders: The subfolders, in name order.
+        real: The resolved keys of the real folders under ``rules/``, which always win.
+        claimed: The resolved keys of the folders already claimed through a link; updated in place.
+        linked: True when the listed folder was itself reached through a link.
+
+    Returns:
+        Every real subfolder of a folder reached without a link, plus each folder reached through a link (the link
+        itself, or any folder below it) that no real folder or earlier claim owns. Every subfolder is claimed when its
+        parent is listed, so a link listed beside another wins over the same folder reached below that other link.
+    """
+    walked: list[tuple[Path, bool]] = []
     for folder in folders:
-        if not _is_folder_link(folder) or _claim_link(folder, real, visited):
-            walked.append(folder)
+        through_link = linked or _is_folder_link(folder)
+        if not through_link or _claim_folder(folder, real, claimed):
+            walked.append((folder, through_link))
     return walked
 
 

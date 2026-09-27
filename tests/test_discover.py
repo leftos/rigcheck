@@ -203,6 +203,44 @@ def test_rule_folder_link_beside_its_target_lists_the_files_once(workspace: Work
     assert [artifact.path for artifact in rules] == [real]
 
 
+def _repo_rule_paths(rig: Rig) -> list[Path]:
+    return [artifact.path for artifact in rig.artifacts if artifact.kind is Kind.RULE and artifact.layer is Layer.REPO]
+
+
+def test_rule_folder_link_to_a_subfolder_of_another_links_target_lists_each_file_once(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    outer = write(workspace.home / "elsewhere" / "g.md", "Outer.\n")
+    inner = write(workspace.home / "elsewhere" / "sub" / "f.md", "Inner.\n")
+    _rule_link(repo, "a", outer.parent)
+    _rule_link(repo, "b", inner.parent)
+    paths = _repo_rule_paths(discover(repo, workspace.home))
+    assert sorted(path.resolve() for path in paths) == sorted([outer.resolve(), inner.resolve()])
+    assert repo / ".claude" / "rules" / "b" / "f.md" in paths
+
+
+def test_rule_folder_link_to_a_parent_of_another_links_target_lists_each_file_once(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    outer = write(workspace.home / "elsewhere" / "g.md", "Outer.\n")
+    inner = write(workspace.home / "elsewhere" / "sub" / "f.md", "Inner.\n")
+    _rule_link(repo, "a", inner.parent)
+    _rule_link(repo, "b", outer.parent)
+    paths = _repo_rule_paths(discover(repo, workspace.home))
+    assert sorted(path.resolve() for path in paths) == sorted([outer.resolve(), inner.resolve()])
+    assert repo / ".claude" / "rules" / "a" / "f.md" in paths
+
+
+@pytest.mark.skipif(os.name != "nt", reason="junctions exist only on Windows")
+def test_rule_folder_junction_to_a_subfolder_of_another_junctions_target_lists_each_file_once(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    outer = write(workspace.home / "elsewhere" / "g.md", "Outer.\n")
+    inner = write(workspace.home / "elsewhere" / "sub" / "f.md", "Inner.\n")
+    _junction_or_skip(repo / ".claude" / "rules" / "a", outer.parent)
+    _junction_or_skip(repo / ".claude" / "rules" / "b", inner.parent)
+    paths = _repo_rule_paths(_discover_within(repo, workspace.home))
+    assert sorted(path.resolve() for path in paths) == sorted([outer.resolve(), inner.resolve()])
+    assert repo / ".claude" / "rules" / "b" / "f.md" in paths
+
+
 def test_rule_file_link_outside_repo_scoped_by_paths_is_not_loaded(workspace: Workspace) -> None:
     repo = workspace.rig()
     external = write(workspace.home / "elsewhere" / "d.md", "---\npaths:\n  - src/**\n---\nScoped.\n")
