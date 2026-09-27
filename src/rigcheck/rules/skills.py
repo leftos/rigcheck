@@ -15,14 +15,14 @@ LISTED_KINDS = (Kind.SKILL, Kind.COMMAND)
 _COMMAND_UNSUPPORTED = frozenset({"name", "paths"})
 """Skill keys a command file does not support; another rule reports them."""
 
-_BOM = "﻿"
+_BOM = "\ufeff"
 
 
 @rule(
     "skill-frontmatter-misplaced",
     "core",
     Severity.ERROR,
-    "Move the opening --- to line 1, with nothing before it.",
+    "Put the opening --- alone on line 1: nothing before it and no spaces around it.",
     ("official:SK1",),
 )
 def skill_frontmatter_misplaced(rig: Rig) -> Iterator[Finding]:
@@ -33,9 +33,15 @@ def skill_frontmatter_misplaced(rig: Rig) -> Iterator[Finding]:
             continue
         first = next((index for index, line in enumerate(lines) if line.strip()), None)
         if first is not None and lines[first].strip() == FENCE:
-            line = first + 1
-            message = f"the frontmatter starts on line {line}, so Claude Code reads the whole file as content and no field is set"
-            yield emit("skill-frontmatter-misplaced", artifact, message, line)
+            yield emit("skill-frontmatter-misplaced", artifact, _misplaced_message(lines, first), first + 1)
+
+
+def _misplaced_message(lines: list[str], first: int) -> str:
+    """Name the problem: spaces around a fence on line 1, or the later line the fence sits on."""
+    consequence = "so Claude Code reads the whole file as content and no field is set"
+    if first == 0:
+        return f'the opening line is "{lines[0].removesuffix("\r")}", not exactly ---, {consequence}'
+    return f"the frontmatter starts on line {first + 1}, {consequence}"
 
 
 @rule(

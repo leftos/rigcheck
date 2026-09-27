@@ -40,8 +40,16 @@ def test_misplaced_after_a_blank_line_fires(workspace: Workspace) -> None:
     assert _findings(workspace, "skill-frontmatter-misplaced", "\n---\nname: a\n---\n") == [(_misplaced(2), 2)]
 
 
+def _not_exact(opening: str) -> str:
+    return f'the opening line is "{opening}", not exactly ---, so Claude Code reads the whole file as content and no field is set'
+
+
 def test_misplaced_indented_fence_fires(workspace: Workspace) -> None:
-    assert _findings(workspace, "skill-frontmatter-misplaced", " ---\nname: a\n---\n") == [(_misplaced(1), 1)]
+    assert _findings(workspace, "skill-frontmatter-misplaced", " ---\nname: a\n---\n") == [(_not_exact(" ---"), 1)]
+
+
+def test_misplaced_fence_with_a_trailing_space_fires(workspace: Workspace) -> None:
+    assert _findings(workspace, "skill-frontmatter-misplaced", "--- \nname: a\n---\n") == [(_not_exact("--- "), 1)]
 
 
 def test_misplaced_after_a_heading_is_not_frontmatter(workspace: Workspace) -> None:
