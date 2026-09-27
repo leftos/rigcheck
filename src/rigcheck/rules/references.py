@@ -19,6 +19,11 @@ _DRIVE = re.compile(r"^[A-Za-z]:")
 _PLACEHOLDER_CHARS = frozenset("*?[]{}<>$%`")
 _NOT_PATH_PREFIXES = ("#",)
 _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]+:")
+_KNOWN_SCHEMES = frozenset(
+    {"tel", "sms", "mailto", "http", "https", "ftp", "file", "data", "javascript", "about", "urn", "ssh", "git"}
+    | {"vscode", "vscode-insiders", "cursor", "zed", "obsidian", "slack"}
+)
+"""Schemes recognised before a ``:line`` suffix is dropped, so ``tel:5550100`` names no file but ``Makefile:12`` does."""
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=(\S*)$")
 _LOCATION = re.compile(r":\d+(?::\d+)?$")
 _HOST = re.compile(r"^[a-z0-9-]+(\.[a-z0-9-]+)*\.(com|org|net|io|dev|ai|app|co|gg|me|sh|xyz)$", re.IGNORECASE)
@@ -72,9 +77,9 @@ def reference_path(reference: Reference) -> str | None:
 
     The text must have no whitespace or leading ``#``; links lose their ``#fragment`` and ``?query``
     and are URL-decoded; code spans lose a ``#fragment``, and a span that is one ``NAME=value``
-    assignment is judged by its value. A token that starts with a scheme holding no dot names no file,
-    and that is decided before the ``:line`` suffix is dropped, so ``tel:5550100`` is not read as the
-    file ``tel`` while ``notes.md:12`` names ``notes.md``. What then remains has a trailing ``:line``
+    assignment is judged by its value. A token that starts with a known scheme (``tel:``, ``mailto:``,
+    ``vscode:`` and the like) names no file, and that is decided before the ``:line`` suffix is dropped,
+    so ``tel:5550100`` is not read as the file ``tel`` while ``Makefile:12`` names ``Makefile``. What then remains has a trailing ``:line``
     or ``:line:column`` and a pytest ``::test`` suffix dropped, and names no file when it starts with a
     URL scheme such as ``https:`` (a single drive letter is not a scheme), holds a glob or placeholder
     character or ``...`` or ``…``, or a ``/`` follows a first segment that is a host name such as
@@ -97,7 +102,7 @@ def reference_path(reference: Reference) -> str | None:
         return None
     head = token.split("::", 1)[0]
     scheme = _SCHEME.match(head)
-    if scheme is not None and "." not in scheme.group(0):
+    if scheme is not None and scheme.group(0)[:-1].lower() in _KNOWN_SCHEMES:
         return None
     token = _LOCATION.sub("", head).replace("\\", "/")
     return None if _names_no_file(token) else token
