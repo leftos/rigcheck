@@ -3,7 +3,8 @@
 from collections.abc import Iterator
 
 from rigcheck.discover import is_outside
-from rigcheck.model import Finding, Kind, Layer, LoadClass, Rig, Severity, unc_link_target
+from rigcheck.model import Artifact, Finding, Kind, Layer, LoadClass, Rig, Severity, unc_link_target
+from rigcheck.parse.globs import bracket_error, matches_any, matches_on_disk, over_budget, rule_patterns
 from rigcheck.rules import emit, rule
 from rigcheck.rules.components import KEYS, components, load, unknown_key_message, yaml_line, yaml_reason
 
@@ -65,3 +66,60 @@ def rule_external_scoped(rig: Rig) -> Iterator[Finding]:
         if isinstance(parsed.data, dict) and "paths" in parsed.data and is_outside(artifact.path, rig.repo_root):
             message = "the rule is reached through a link out of the project and has paths, so Claude Code never loads it"
             yield emit("rule-external-scoped", artifact, message, parsed.key_lines.get("paths", 1))
+
+
+def _repo_rule_patterns(rig: Rig) -> Iterator[tuple[Artifact, list[str], int]]:
+    """Yield each repo-layer rule that has ``paths``, with its patterns as written (negated ones included) and the ``paths`` line."""
+    for artifact in components(rig, RULE_KINDS):
+        if artifact.layer is not Layer.REPO or unc_link_target(artifact.path) is not None:
+            continue
+        parsed = load(rig, artifact)
+        if not isinstance(parsed.data, dict) or "paths" not in parsed.data:
+            continue
+        yield artifact, rule_patterns(parsed.data["paths"]), parsed.key_lines.get("paths", 1)
+
+
+def _globs(patterns: list[str]) -> list[str]:
+    """Return the patterns with a leading ``!`` stripped, so negated patterns are checked as the glob they negate."""
+    return [pattern.removeprefix("!") for pattern in patterns]
+
+
+@rule(
+    "rule-glob-invalid",
+    "core",
+    Severity.ERROR,
+    "Close the bracket expression or escape the [ as \\[, and keep brace expansion under 1,000 patterns across the rule's paths.",
+    ("official:RL3",),
+)
+def rule_glob_invalid(rig: Rig) -> Iterator[Finding]:
+    """A rule paths pattern Claude Code cannot use, so it matches no file."""
+    for artifact, patterns, line in _repo_rule_patterns(rig):
+        for pattern in patterns:
+            if bracket_error(pattern.removeprefix("!")):
+                message = f'the pattern "{pattern}" has a [ that starts no bracket expression, so it matches nothing'
+                yield emit("rule-glob-invalid", artifact, message, line)
+        if over_budget(_globs(patterns)):
+            message = "the paths patterns expand past 1,000 patterns or 4 MiB, so their braces match no files"
+            yield emit("rule-glob-invalid", artifact, message, line)
+
+
+@rule(
+    "rule-glob-unmatched",
+    "core",
+    Severity.WARN,
+    "Correct the pattern so it names files in this repository (paths are relative to the project root), or remove it.",
+    ("official:RL3",),
+)
+def rule_glob_unmatched(rig: Rig) -> Iterator[Finding]:
+    """A rule paths pattern that matches no file in the repository."""
+    files = rig.project_files
+    if files is None:
+        return
+    for artifact, patterns, line in _repo_rule_patterns(rig):
+        if artifact.load_class is LoadClass.NOT_LOADED or over_budget(_globs(patterns)):
+            continue
+        for pattern in (pattern for pattern in patterns if not pattern.startswith("!")):
+            if bracket_error(pattern) or matches_any(pattern, files) or matches_on_disk(pattern, rig.repo_root):
+                continue
+            message = f'the pattern "{pattern}" matches no file in the repository, so the rule never loads'
+            yield emit("rule-glob-unmatched", artifact, message, line)

@@ -181,6 +181,17 @@ class Rig:
             return frozenset()
         return frozenset(name for name in output.split("\0") if name)
 
+    @cached_property
+    def project_files(self) -> frozenset[str] | None:
+        """The repository's tracked and untracked-but-not-ignored files, as repo-relative POSIX paths.
+
+        None when the repo root is not a git repository or git is unavailable.
+        """
+        output = git_output(self.repo_root, "ls-files", "-co", "--exclude-standard", "-z")
+        if output is None:
+            return None
+        return frozenset(name for name in output.split("\0") if name)
+
     def is_tracked(self, path: Path) -> bool:
         """Return True when git tracks ``path`` in this rig's repository."""
         try:

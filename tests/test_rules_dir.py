@@ -8,7 +8,7 @@ import pytest
 from rigcheck import engine
 from rigcheck.discover import MAX_BYTES, discover
 from rigcheck.rules import REGISTRY
-from support import Workspace, symlink_or_skip, write
+from support import Workspace, git_add, symlink_or_skip, write
 
 RULE = Path(".claude") / "rules" / "style.md"
 UNC_RULES = r"\\server\share\rules" if os.name == "nt" else "//server/share/rules"
@@ -81,6 +81,81 @@ def _every_rule_id(workspace: Workspace) -> list[str]:
     repo = workspace.rig()
     findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
     return [finding.rule_id for finding in findings]
+
+
+def _in_git(workspace: Workspace, *names: str) -> None:
+    repo = workspace.rig()
+    for name in names:
+        write(repo / name, "content\n")
+    git_add(repo, list(names))
+
+
+def test_glob_invalid_over_budget_once_per_rule(workspace: Workspace) -> None:
+    text = '---\npaths: ["src/{1..600}.ts", "lib/{1..600}.ts"]\n---\n\nToo many.\n'
+    expected = [("the paths patterns expand past 1,000 patterns or 4 MiB, so their braces match no files", 2)]
+    assert _findings(workspace, "rule-glob-invalid", text) == expected
+
+
+def test_glob_unmatched_silent_outside_git(workspace: Workspace) -> None:
+    assert _findings(workspace, "rule-glob-unmatched", '---\npaths: ["lib/**"]\n---\n\nNo repo.\n') == []
+
+
+def test_glob_unmatched_skips_negated(workspace: Workspace) -> None:
+    _in_git(workspace, "src/app.ts")
+    assert _findings(workspace, "rule-glob-unmatched", '---\npaths: ["src/**", "!lib/**"]\n---\n\nNegated.\n') == []
+
+
+def test_glob_rules_skip_user_layer(workspace: Workspace) -> None:
+    _in_git(workspace, "src/app.ts")
+    text = '---\npaths: ["photos [2024/**", "lib/**"]\n---\n\nMine.\n'
+    assert _findings(workspace, "rule-glob-invalid", text, in_home=True) == []
+    assert _run(workspace, "rule-glob-unmatched") == []
+
+
+def test_glob_unmatched_matches_dotfiles(workspace: Workspace) -> None:
+    _in_git(workspace, ".github/workflows/ci.yml")
+    assert _findings(workspace, "rule-glob-unmatched", '---\npaths: ["**/*.yml"]\n---\n\nWorkflows.\n') == []
+
+
+def test_glob_unmatched_silent_for_ignored_folder(workspace: Workspace) -> None:
+    _in_git(workspace, ".gitignore")
+    repo = workspace.rig()
+    write(repo / ".gitignore", "reference/\n")
+    write(repo / "reference" / "cifp" / "FAACIFP18", "data\n")
+    assert _findings(workspace, "rule-glob-unmatched", '---\npaths: ["reference/cifp/**"]\n---\n\nParser.\n') == []
+
+
+def test_glob_unmatched_fires_under_tracked_folder(workspace: Workspace) -> None:
+    _in_git(workspace, "src/app.ts")
+    expected = [('the pattern "src/*.nope" matches no file in the repository, so the rule never loads', 2)]
+    assert _findings(workspace, "rule-glob-unmatched", '---\npaths: ["src/*.nope"]\n---\n\nNothing.\n') == expected
+
+
+def test_glob_unmatched_silent_for_nested_repo(workspace: Workspace) -> None:
+    _in_git(workspace, "src/app.ts")
+    nested = workspace.rig() / "nested"
+    write(nested / "src" / "a.c", "int a;\n")
+    git_add(nested, ["src/a.c"])
+    assert _findings(workspace, "rule-glob-unmatched", '---\npaths: ["nested/**/*.c"]\n---\n\nNested.\n') == []
+
+
+def test_glob_unmatched_silent_for_deep_ignored_folder(workspace: Workspace) -> None:
+    _in_git(workspace, ".gitignore", "src/app.ts")
+    repo = workspace.rig()
+    write(repo / ".gitignore", "src/generated/\n")
+    write(repo / "src" / "generated" / "x.ts", "export {};\n")
+    assert _findings(workspace, "rule-glob-unmatched", '---\npaths: ["src/**/generated/*.ts"]\n---\n\nGenerated.\n') == []
+
+
+def test_glob_invalid_counts_negated_in_budget(workspace: Workspace) -> None:
+    text = '---\npaths: ["src/{1..600}.ts", "!lib/{1..600}.ts"]\n---\n\nToo many.\n'
+    expected = [("the paths patterns expand past 1,000 patterns or 4 MiB, so their braces match no files", 2)]
+    assert _findings(workspace, "rule-glob-invalid", text) == expected
+
+
+def test_glob_invalid_reports_negated_bracket(workspace: Workspace) -> None:
+    expected = [('the pattern "!photos [2024/**" has a [ that starts no bracket expression, so it matches nothing', 2)]
+    assert _findings(workspace, "rule-glob-invalid", '---\npaths: ["src/**", "!photos [2024/**"]\n---\n\nPhotos.\n') == expected
 
 
 def test_frontmatter_invalid_silent_when_not_loaded(workspace: Workspace) -> None:
