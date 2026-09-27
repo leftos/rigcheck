@@ -33,7 +33,7 @@ The generic loop is the user-level `nextup` skill; this file supplies only what 
   - `uv run ruff check .`
   - `uv run ty check`
   - `nice -n 10 uv run pytest` (scoped with `-k <rule-id>` during a step, whole suite once at the end)
-  - Smoke after any discovery or rule change: `uv run rigcheck check D:/yaat --format json > .tmp/smoke-yaat.json` and `uv run rigcheck check "$HOME" --format json > .tmp/smoke-home.json`; no `internal-error` finding in either. Compare rule counts against the previous smoke; a jump in one rule is a false-positive suspect to explain before landing.
+  - Smoke after any discovery or rule change (user, 2026-09-27: every recently active repo on D:/, not only yaat): `bash .claude/skills/rigcheck-nextup/smoke.sh > .tmp/smoke.log 2>&1; rc=$?; cat .tmp/smoke.log; (exit $rc)` from the worktree root. It checks every git repo under D:/ with a commit in the last 30 days (rigcheck excluded) plus `$HOME`, writes `.tmp/smoke/<name>.json`, prints counts only (user and plugin layers once, repo layer per repo), and fails on an `internal-error`. Compare against the same script's output on `main`; a new rule's hits on real repos are read before landing, and a jump in one rule is a false-positive suspect to bring to the user.
 - Parent-side gate: `git -C <wt> status --short` in the worktree and in the main checkout.
 
 ## Traps
