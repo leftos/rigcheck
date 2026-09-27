@@ -21,7 +21,6 @@ AGENT_DESCRIPTIONS_BUDGET = 15_000
 
 _STRIPPED_KINDS = (Kind.INSTRUCTIONS, Kind.NESTED_INSTRUCTIONS)
 _LISTED_KINDS = (Kind.SKILL, Kind.COMMAND)
-_READ_KEYS = ("name", "description", "when_to_use", "disable-model-invocation")
 
 
 @dataclass(frozen=True)
@@ -109,15 +108,8 @@ def _entry(rig: Rig, artifact: Artifact) -> _Entry:
     default_name = artifact.path.parent.name if artifact.kind is Kind.SKILL else artifact.path.stem
     text = rig.text(artifact.path)
     parsed = frontmatter.parse(text)
-    if not parsed.present:
-        return _Entry(default_name, "", "", disabled=False)
-    data: Mapping[Any, Any]
-    if parsed.data is not None:
-        data = parsed.data
-        disabled = data.get("disable-model-invocation") is True
-    else:
-        data = frontmatter.read_lenient(text, _READ_KEYS)
-        disabled = _text_field(data, "disable-model-invocation").strip().lower() == "true"
+    data: Mapping[Any, Any] = parsed.data if parsed.data is not None else {}
+    disabled = frontmatter.as_bool(data.get("disable-model-invocation")) is True
     name = _text_field(data, "name") or default_name
     return _Entry(name, _text_field(data, "description"), _text_field(data, "when_to_use"), disabled=disabled)
 

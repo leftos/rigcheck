@@ -107,6 +107,16 @@ def test_disabled_model_invocation_is_not_listed(workspace: Workspace) -> None:
     assert result.skill_listing.tokens_est == _description("lint: Lints.")
 
 
+def test_disabled_model_invocation_reads_yes_and_on(workspace: Workspace) -> None:
+    _skill(workspace.home, "deploy", "name: deploy\ndescription: Deploys.\ndisable-model-invocation: yes\n")
+    _skill(workspace.home, "push", "name: push\ndescription: Pushes.\ndisable-model-invocation: 'Yes'\n")
+    _skill(workspace.home, "ship", "name: ship\ndescription: Ships: now.\ndisable-model-invocation: on\n")
+    _skill(workspace.home, "fmt", "name: fmt\ndescription: Formats.\ndisable-model-invocation: 'off'\n")
+    result = budget.compute(discover(workspace.rig(), workspace.home), 200_000)
+    assert result.skill_listing.entries == 1
+    assert result.skill_listing.tokens_est == _description("fmt: Formats.")
+
+
 def test_commands_count_as_listing_entries(workspace: Workspace) -> None:
     write(workspace.home / ".claude" / "commands" / "ship.md", "---\ndescription: Ship it.\n---\n\nShip.\n")
     write(workspace.home / ".claude" / "commands" / "plain.md", "Plain command body.\n")
@@ -133,6 +143,15 @@ def test_agent_frontmatter_strict_yaml_rejects_still_counts(workspace: Workspace
     assert result.agent_descriptions.entries == 2
     assert result.agent_descriptions.tokens_est == _description("fixer: Use when: a thing: breaks") + _description("unclosed")
     assert result.agent_descriptions.budget == 15_000
+
+
+def test_agent_counts_what_claude_code_loads(workspace: Workspace) -> None:
+    agents = workspace.home / ".claude" / "agents"
+    write(agents / "quoted.md", '---\nname: finder\ndescription: Say "find it" then: stop.\nmodel: sonnet\n---\n\nFind.\n')
+    write(agents / "crlf.md", "---\r\nname: never\r\ndescription: Use when: it breaks\r\n---\r\n\r\nBody.\r\n")
+    result = budget.compute(discover(workspace.rig(), workspace.home), 200_000)
+    assert result.agent_descriptions.entries == 2
+    assert result.agent_descriptions.tokens_est == _description('finder: Say "find it" then: stop.') + _description("crlf")
 
 
 def test_listing_budget_is_one_percent_of_the_window(workspace: Workspace) -> None:
