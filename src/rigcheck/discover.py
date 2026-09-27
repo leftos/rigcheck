@@ -4,7 +4,7 @@ import json
 import os
 import re
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -288,35 +288,104 @@ def _is_outside(path: Path, root: Path) -> bool:
 
 
 def _rule_files(b: _Builder, base: Path) -> list[Path]:
-    """Return the ``*.md`` files under ``base/rules`` in sorted order, following each linked folder once.
+    """Return the paths under ``base/rules`` to report: its ``*.md`` files and its links to network paths.
 
-    Rules reached through a linked folder are loadable, so the walk follows folder symlinks; a folder whose
-    resolved path was already claimed is skipped, which lists a linked folder once and terminates a link cycle.
+    A rule reached through a linked folder loads where a rule reached through a link to a network path does
+    not, so the walk follows folder links but reports a network link as itself and never enters it. A real
+    folder under ``rules/`` always wins over a link resolving to it; between links to one folder outside
+    ``rules/``, the first in walk order wins.
     """
     root = base / "rules"
+    if unc_link_target(root) is not None:
+        return [root]
     if not root.is_dir():
         return []
 
     def on_error(error: OSError) -> None:
-        b.problems.append(f"cannot list {error.filename}: {error.strerror or error}")
+        message = f"cannot list {error.filename}: {error.strerror or error}"
+        if message not in b.problems:
+            b.problems.append(message)
 
-    def claim(directory: Path, names: list[str]) -> list[str]:
-        kept = []
-        for name in sorted(names):
-            key = _resolved_key(Path(directory, name))
-            if key in visited:
-                continue
-            visited.add(key)
-            kept.append(name)
-        return kept
-
+    real = _real_rule_dirs(root, on_error)
     found: list[Path] = []
     visited: set[str] = set()
-    for directory, subdirs, files in os.walk(root, followlinks=True, onerror=on_error):
-        visited.add(_resolved_key(Path(directory)))
-        subdirs[:] = claim(Path(directory), subdirs)
-        found.extend(Path(directory, name) for name in files if name.endswith(".md"))
+    pending = [root]
+    while pending:
+        current = pending.pop()
+        visited.add(_resolved_key(current))
+        folders, paths = _list_rules_dir(current, on_error)
+        found.extend(path for path in paths if path.name.endswith(".md") or unc_link_target(path) is not None)
+        walked = _walkable_rule_folders(folders, real, visited)
+        pending.extend(reversed(walked))
     return sorted(found)
+
+
+def _list_rules_dir(directory: Path, on_error: Callable[[OSError], None]) -> tuple[list[Path], list[Path]]:
+    """Return ``(subfolders, paths)`` for ``directory``, classifying entries without following a network link.
+
+    Args:
+        directory: The folder to list.
+        on_error: Called with the ``OSError`` when the folder cannot be listed.
+
+    Returns:
+        Every subfolder in name order, and every other entry: a link to a network path is reported here, so
+        the walk neither resolves nor enters it.
+    """
+    try:
+        with os.scandir(directory) as iterator:
+            entries = sorted(iterator, key=lambda entry: entry.name)
+    except OSError as exc:
+        on_error(exc)
+        return [], []
+    folders: list[Path] = []
+    paths: list[Path] = []
+    for entry in entries:
+        path = Path(entry.path)
+        if unc_link_target(path) is not None:
+            paths.append(path)
+        elif entry.is_dir():
+            folders.append(path)
+        else:
+            paths.append(path)
+    return folders, paths
+
+
+def _is_folder_link(path: Path) -> bool:
+    """Return True when ``path`` is a link to another folder: a symlink, or a Windows directory junction."""
+    return path.is_symlink() or path.is_junction()
+
+
+def _real_rule_dirs(root: Path, on_error: Callable[[OSError], None]) -> set[str]:
+    """Return the resolved keys of the real folders under ``root``: no link is entered to find them."""
+    keys: set[str] = set()
+    pending = [root]
+    while pending:
+        current = pending.pop()
+        key = _resolved_key(current)
+        if key in keys:
+            continue
+        keys.add(key)
+        folders, _paths = _list_rules_dir(current, on_error)
+        pending.extend(folder for folder in folders if not _is_folder_link(folder))
+    return keys
+
+
+def _claim_link(folder: Path, real: set[str], visited: set[str]) -> bool:
+    """Claim ``folder``, a link to a folder: True when it is walked, False when a real folder or another link owns it."""
+    key = _resolved_key(folder)
+    if key in real or key in visited:
+        return False
+    visited.add(key)
+    return True
+
+
+def _walkable_rule_folders(folders: list[Path], real: set[str], visited: set[str]) -> list[Path]:
+    """Return the subfolders to walk: every real folder, plus each folder link no real folder or earlier link owns."""
+    walked: list[Path] = []
+    for folder in folders:
+        if not _is_folder_link(folder) or _claim_link(folder, real, visited):
+            walked.append(folder)
+    return walked
 
 
 def _rule_load_class(b: _Builder, path: Path, layer: Layer, repo_root: Path) -> LoadClass:
