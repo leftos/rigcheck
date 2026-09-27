@@ -52,12 +52,18 @@ def test_link_with_fragment_resolves(workspace: Workspace) -> None:
     assert _findings(workspace, files) == []
 
 
+def test_flat_name_is_a_file_link(workspace: Workspace) -> None:
+    findings = _findings(workspace, {"MEMORY.md": "- [deploy](deploy.sh)\n"})
+    assert [(finding.rule_id, finding.message, finding.line) for finding in findings] == [("memory-link-broken", "deploy.sh does not exist", 1)]
+
+
 def test_non_path_hrefs_are_not_reported(workspace: Workspace) -> None:
     index = "".join(
         [
             "- [Dashboard](grafana.example.com/d/abc)\n",
             "- [notes](a.md:12)\n",
             "- [call](tel:+15550100)\n",
+            "- [call](tel:5550100)\n",
             "- [template](%3Cplaceholder%3E)\n",
             "- [a](a.md#x)\n",
         ]
