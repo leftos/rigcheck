@@ -1,0 +1,6 @@
+---
+- src/**
+- docs/**
+---
+
+Style rules.

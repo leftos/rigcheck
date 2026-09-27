@@ -108,6 +108,26 @@ def load(rig: Rig, artifact: Artifact) -> frontmatter.Frontmatter:
     return frontmatter.parse(rig.text(artifact.path))
 
 
+def _normalise(key: str) -> str:
+    return key.lower().replace("-", "").replace("_", "")
+
+
+def unknown_key_message(key: str, known: frozenset[str]) -> str:
+    """Return the unknown-key message, naming the one known key that differs from ``key`` only in case, ``-`` or ``_``.
+
+    Args:
+        key: The key the frontmatter sets.
+        known: The keys the artifact kind recognizes.
+
+    Returns:
+        The message, with a ``did you mean`` hint when exactly one known key is a near match of ``key``.
+    """
+    matches = [candidate for candidate in known if _normalise(candidate) == _normalise(key)]
+    if len(matches) == 1:
+        return f'unknown key "{key}" (did you mean "{matches[0]}"?); Claude Code ignores it'
+    return f'unknown key "{key}"; Claude Code ignores it'
+
+
 def yaml_reason(strict_error: str) -> str:
     """Return the line of ``strict_error`` that names the problem, skipping PyYAML's context lines.
 

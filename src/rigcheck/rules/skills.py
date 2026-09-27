@@ -7,7 +7,7 @@ from rigcheck.model import Finding, Kind, Rig, Severity
 from rigcheck.parse.frontmatter import FENCE, as_bool
 from rigcheck.report.budget import LISTING_DETAIL_CHARS
 from rigcheck.rules import emit, rule
-from rigcheck.rules.components import KEYS, components, load, yaml_line, yaml_reason
+from rigcheck.rules.components import KEYS, components, load, unknown_key_message, yaml_line, yaml_reason
 
 LISTED_KINDS = (Kind.SKILL, Kind.COMMAND)
 """The artifact kinds whose frontmatter follows the skill format."""
@@ -61,18 +61,6 @@ def skill_frontmatter_invalid(rig: Rig) -> Iterator[Finding]:
             yield emit("skill-frontmatter-invalid", artifact, message, yaml_line(error))
 
 
-def _normalise(key: str) -> str:
-    return key.lower().replace("-", "").replace("_", "")
-
-
-def _unknown_message(key: str, known: frozenset[str]) -> str:
-    """Return the unknown-key message, naming the one known key that differs from ``key`` only in case, ``-`` or ``_``."""
-    matches = [candidate for candidate in known if _normalise(candidate) == _normalise(key)]
-    if len(matches) == 1:
-        return f'unknown key "{key}" (did you mean "{matches[0]}"?); Claude Code ignores it'
-    return f'unknown key "{key}"; Claude Code ignores it'
-
-
 @rule(
     "skill-key-unknown",
     "core",
@@ -90,7 +78,8 @@ def skill_key_unknown(rig: Rig) -> Iterator[Finding]:
         skipped = _COMMAND_UNSUPPORTED if artifact.kind is Kind.COMMAND else frozenset()
         for key in map(str, parsed.data):
             if key not in known and key not in skipped:
-                yield emit("skill-key-unknown", artifact, _unknown_message(key, known), parsed.key_lines.get(key, 1))
+                message = unknown_key_message(key, known)
+                yield emit("skill-key-unknown", artifact, message, parsed.key_lines.get(key, 1))
 
 
 def _text(value: Any) -> str:

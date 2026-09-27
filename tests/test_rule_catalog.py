@@ -26,9 +26,20 @@ def _unc_link(rig: Path) -> None:
     symlink_or_skip(rig / "CLAUDE.md", target)
 
 
+def _external_rule_link(rig: Path, *, scoped: bool) -> None:
+    """Point ``rig``'s ``rules/shared`` at a folder outside the rig holding one rule, scoped by ``paths`` or not."""
+    body = "---\npaths:\n  - src/**\n---\n\nScoped.\n" if scoped else "External rule.\n"
+    target = write(rig.parent.parent / "elsewhere-rules" / "scoped.md", body).parent
+    link = rig / ".claude" / "rules" / "shared"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    symlink_or_skip(link, os.fspath(target))
+
+
 RUNTIME_SETUP: dict[tuple[str, str], Callable[[Path], None]] = {
     ("instructions-too-large", "bad"): _pad_past_limit,
     ("unc-symlink", "bad"): _unc_link,
+    ("rule-external-scoped", "bad"): lambda rig: _external_rule_link(rig, scoped=True),
+    ("rule-external-scoped", "good"): lambda rig: _external_rule_link(rig, scoped=False),
 }
 
 
