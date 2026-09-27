@@ -1,10 +1,14 @@
 """Shared helpers for the component rules: artifact selection, recognized key tables and the frontmatter warn."""
 
+import re
 from collections.abc import Iterator
 
 from rigcheck.model import Artifact, Finding, Kind, Rig, Severity
 from rigcheck.parse import frontmatter
 from rigcheck.rules import emit, rule
+
+_LINE_REFERENCE = re.compile(r"line (\d+), column")
+"""The line and column a PyYAML error's mark names."""
 
 SKILL_KEYS = frozenset(
     {
@@ -104,6 +108,33 @@ def load(rig: Rig, artifact: Artifact) -> frontmatter.Frontmatter:
     return frontmatter.parse(rig.text(artifact.path))
 
 
+def _yaml_reason(strict_error: str) -> str:
+    """Return the line of ``strict_error`` that names the problem, skipping PyYAML's context lines.
+
+    Args:
+        strict_error: The error :func:`rigcheck.parse.frontmatter.parse` reported.
+
+    Returns:
+        The last line that starts at column 0 and is not an ``in "..."`` mark; the first line when there is none.
+    """
+    lines = strict_error.removeprefix("invalid YAML: ").splitlines()
+    named = [line for line in lines if line[:1].strip() and not line.startswith('in "')]
+    return named[-1] if named else lines[0]
+
+
+def _yaml_line(strict_error: str) -> int:
+    """Return the file line the error points at: the block's line ``N`` is the file's line ``N + 1``.
+
+    Args:
+        strict_error: The error :func:`rigcheck.parse.frontmatter.parse` reported.
+
+    Returns:
+        One more than the last ``line N`` the error names, or 1 when it names none.
+    """
+    marks = _LINE_REFERENCE.findall(strict_error)
+    return int(marks[-1]) + 1 if marks else 1
+
+
 @rule(
     "frontmatter-yaml-nonstandard",
     "core",
@@ -117,6 +148,6 @@ def frontmatter_yaml_nonstandard(rig: Rig) -> Iterator[Finding]:
     for artifact in components(rig, FRONTMATTER_KINDS):
         parsed = load(rig, artifact)
         if parsed.present and parsed.strict_error is not None and parsed.load_error is None:
-            reason = parsed.strict_error.splitlines()[0].removeprefix("invalid YAML: ")
-            message = f"frontmatter is not strict YAML ({reason}); Claude Code loads it only through its retry"
-            yield emit("frontmatter-yaml-nonstandard", artifact, message, 1)
+            error = parsed.strict_error
+            message = f"frontmatter is not strict YAML ({_yaml_reason(error)}); Claude Code loads it only through its retry"
+            yield emit("frontmatter-yaml-nonstandard", artifact, message, _yaml_line(error))

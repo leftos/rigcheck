@@ -1,19 +1,29 @@
 """The component rules' shared module: artifact selection, key tables and the frontmatter warn."""
 
 import json
+from pathlib import Path
 
 from rigcheck import engine
 from rigcheck.discover import discover
-from rigcheck.model import Kind, Layer
+from rigcheck.model import Finding, Kind, Layer
 from rigcheck.rules import REGISTRY
-from rigcheck.rules.components import COMMAND_KEYS, FRONTMATTER_KINDS, SKILL_KEYS, components
+from rigcheck.rules.components import COMMAND_KEYS, FRONTMATTER_KINDS, SKILL_KEYS, _yaml_line, components
 from support import Workspace, write
 
 PLUGIN = "tools@market"
+AGENT = Path(".claude") / "agents" / "helper.md"
 
 
 def _file(frontmatter: str) -> str:
     return f"---\n{frontmatter}---\n\nBody.\n"
+
+
+def _agent_findings(workspace: Workspace, frontmatter: str) -> list[Finding]:
+    repo = workspace.rig()
+    write(repo / "CLAUDE.md", "# Project\n")
+    write(repo / AGENT, _file(frontmatter))
+    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    return [finding for finding in findings if finding.rule_id == "frontmatter-yaml-nonstandard"]
 
 
 def test_components_selects_kinds_in_rig_order(workspace: Workspace) -> None:
@@ -34,6 +44,23 @@ def test_command_keys_are_the_skill_keys_without_name_and_paths() -> None:
     assert SKILL_KEYS - {"name", "paths"} == COMMAND_KEYS
 
 
+def test_reason_is_the_problem_line_not_the_context(workspace: Workspace) -> None:
+    findings = _agent_findings(workspace, "name: helper\ndescription: @foo bar\n")
+    expected = "frontmatter is not strict YAML (found character '@' that cannot start any token); Claude Code loads it only through its retry"
+    assert [(finding.message, finding.line) for finding in findings] == [(expected, 3)]
+
+
+def test_line_is_the_block_line_plus_one(workspace: Workspace) -> None:
+    findings = _agent_findings(workspace, "name: helper\ndescription: use when: x\n")
+    expected = "frontmatter is not strict YAML (mapping values are not allowed here); Claude Code loads it only through its retry"
+    assert [(finding.message, finding.line) for finding in findings] == [(expected, 3)]
+
+
+def test_line_falls_back_to_one_without_a_line_reference() -> None:
+    assert _yaml_line("invalid YAML: unexpected end of stream") == 1
+    assert _yaml_line("unclosed frontmatter") == 1
+
+
 def test_plugin_layer_skill_fires(workspace: Workspace) -> None:
     repo = workspace.rig()
     write(repo / "CLAUDE.md", "# Project\n")
@@ -45,4 +72,4 @@ def test_plugin_layer_skill_fires(workspace: Workspace) -> None:
     write(workspace.home / ".claude" / "settings.json", json.dumps({"enabledPlugins": {PLUGIN: True}}))
     findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
     fired = [finding for finding in findings if finding.rule_id == "frontmatter-yaml-nonstandard"]
-    assert [(finding.layer, finding.line) for finding in fired] == [(Layer.PLUGIN, 1)]
+    assert [(finding.layer, finding.line) for finding in fired] == [(Layer.PLUGIN, 3)]
