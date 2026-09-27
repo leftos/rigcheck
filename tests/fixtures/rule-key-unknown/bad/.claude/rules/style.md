@@ -1,0 +1,5 @@
+---
+globs: "src/**"
+---
+
+Style rules.

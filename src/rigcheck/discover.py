@@ -282,7 +282,7 @@ def _resolved_key(path: Path) -> str:
         return path_key(path)
 
 
-def _is_outside(path: Path, root: Path) -> bool:
+def is_outside(path: Path, root: Path) -> bool:
     """Return True when ``path`` resolves outside ``root``, which is how a linked rule leaves the project."""
     return not Path(_resolved_key(path)).is_relative_to(Path(_resolved_key(root)))
 
@@ -407,7 +407,7 @@ def _rule_load_class(b: _Builder, path: Path, layer: Layer, repo_root: Path) -> 
     parsed = frontmatter.parse(text or "")
     if parsed.data is not None and "paths" in parsed.data:
         # RL7: a rule reached through a link out of the project loads only while it carries no `paths`.
-        if layer is Layer.REPO and _is_outside(path, repo_root):
+        if layer is Layer.REPO and is_outside(path, repo_root):
             return LoadClass.NOT_LOADED
         return LoadClass.ON_DEMAND
     return LoadClass.EVERY_TURN
