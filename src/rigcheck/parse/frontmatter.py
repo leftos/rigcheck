@@ -117,10 +117,11 @@ def _key_lines(block: list[str], data: dict[Any, Any] | None) -> dict[str, int]:
     for index, line in enumerate(block):
         match = _KEY_LINE.match(line)
         if match:
-            found[match.group(1).rstrip()] = index + 2
+            found[_unquote(match.group(1).rstrip())] = index + 2
     if data is None:
         return found
-    return {key: line for key, line in found.items() if key in data}
+    loaded = {str(key) for key in data}
+    return {key: line for key, line in found.items() if key in loaded}
 
 
 def as_bool(value: object) -> bool | None:

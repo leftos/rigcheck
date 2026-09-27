@@ -182,6 +182,19 @@ def test_frontmatter_key_lines_on_a_block_claude_code_rejects() -> None:
 
 
 @pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ('---\n"name": n\ndescription: d\n---\n', {"name": 2, "description": 3}),
+        ("---\n'name': n\ndescription: d\n---\n", {"name": 2, "description": 3}),
+        ("---\n1: x\ndescription: d\n---\n", {"1": 2, "description": 3}),
+    ],
+    ids=["double-quoted", "single-quoted", "integer"],
+)
+def test_key_lines_reads_a_quoted_key(text: str, expected: dict[str, int]) -> None:
+    assert frontmatter.parse(text).key_lines == expected
+
+
+@pytest.mark.parametrize(
     ("value", "expected"),
     [
         (True, True),
