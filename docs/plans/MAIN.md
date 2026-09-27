@@ -2,8 +2,8 @@
 
 ## Current focus
 
-- [ ] Research: official guidance (Anthropic docs, AGENTS.md spec) — background agent running; lands as `docs/research/official.md`
-- [ ] Research: non-official state of the art, evidence-graded — background agent running; lands as `docs/research/sota.md`
+- [x] Research: official guidance (Anthropic docs, AGENTS.md spec) — [research/official.md](../research/official.md)
+- [x] Research: non-official state of the art, evidence-graded — [research/sota.md](../research/sota.md)
 - [ ] Rule catalog from both reports: `core` pack (official or grade A/B evidence only), `house` pack (opinionated, off by default), rejected list with reasons
 - [ ] Architecture plan and approval (subplan to be written)
 
