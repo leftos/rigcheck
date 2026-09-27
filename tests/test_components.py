@@ -7,7 +7,7 @@ from rigcheck import engine
 from rigcheck.discover import discover
 from rigcheck.model import Finding, Kind, Layer
 from rigcheck.rules import REGISTRY
-from rigcheck.rules.components import COMMAND_KEYS, FRONTMATTER_KINDS, SKILL_KEYS, _yaml_line, components
+from rigcheck.rules.components import COMMAND_KEYS, FRONTMATTER_KINDS, SKILL_KEYS, components, yaml_line
 from support import Workspace, write
 
 PLUGIN = "tools@market"
@@ -57,8 +57,8 @@ def test_line_is_the_block_line_plus_one(workspace: Workspace) -> None:
 
 
 def test_line_falls_back_to_one_without_a_line_reference() -> None:
-    assert _yaml_line("invalid YAML: unexpected end of stream") == 1
-    assert _yaml_line("unclosed frontmatter") == 1
+    assert yaml_line("invalid YAML: unexpected end of stream") == 1
+    assert yaml_line("unclosed frontmatter") == 1
 
 
 def test_plugin_layer_skill_fires(workspace: Workspace) -> None:
