@@ -1,0 +1,8 @@
+---
+name: demo
+description: Demo skill. Use when testing rigcheck fixtures.
+---
+
+# Demo
+
+Read [the reference](reference.md) and [the details](details.md).
