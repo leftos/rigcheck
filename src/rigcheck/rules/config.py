@@ -115,7 +115,7 @@ def _json_hooks(rig: Rig, artifact: Artifact, source: HookSource) -> HookMap | N
     hooks = doc.data.get("hooks")
     if not isinstance(hooks, dict):
         return None
-    return HookMap(artifact, source, _str_keys(hooks), config.key_line(text, "hooks"))
+    return HookMap(artifact, source, _str_keys(hooks), config.key_line(text, ("hooks",)))
 
 
 def _frontmatter_hooks(rig: Rig, artifact: Artifact, source: HookSource) -> HookMap | None:
@@ -200,7 +200,7 @@ def _mcp_servers(rig: Rig, artifact: Artifact, source: McpSource) -> Iterator[Mc
         return
     for name, server in servers.items():
         if isinstance(name, str):
-            yield McpServer(artifact, source, name, server, config.key_line(text, name))
+            yield McpServer(artifact, source, name, server, config.key_line(text, ("mcpServers", name)))
 
 
 def mcp_servers(rig: Rig) -> Iterator[McpServer]:

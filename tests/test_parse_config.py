@@ -41,21 +41,39 @@ def test_load_strips_a_leading_bom() -> None:
     assert doc.data == {"hooks": {}}
 
 
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    [
-        ('{"hooks": {"Stop": []}}', 1),
-        ('{"hooks" : {}}', 1),
-        ('{\n  "enabledPlugins": {},\n  "hooks": {"Stop": []}\n}', 3),
-        ('{"a": "hooks"}', None),
-        ('{\n  "note": "hooks: x"\n}', None),
-        ('{"a": "hooks", "hooks": 1}', 1),
-        ('[\n  {"hooks": []}\n]', 2),
-    ],
-)
-def test_key_line(text: str, expected: int | None) -> None:
-    assert config.key_line(text, "hooks") == expected
+def test_load_huge_number_is_a_problem() -> None:
+    doc = config.load("1" * 5000)
+    assert doc.data is None
+    assert doc.problem == "not loadable JSON: ValueError"
 
 
-def test_key_line_absent_for_a_text_without_the_key() -> None:
-    assert config.key_line('{"mcpServers": {}}', "hooks") is None
+def test_load_deep_nesting_is_a_problem() -> None:
+    doc = config.load("[" * 100000)
+    assert doc.data is None
+    assert doc.problem == "not loadable JSON: RecursionError"
+
+
+def test_key_line_top_level() -> None:
+    assert config.key_line('{\n"a": "hooks",\n"hooks": {}\n}', ("hooks",)) == 3
+
+
+def test_key_line_nested_path() -> None:
+    text = '{\n"mcpServers": {\n"a": {"env": {"b": 1}},\n"b": {}}}'
+    assert config.key_line(text, ("mcpServers", "b")) == 4
+    assert config.key_line(text, ("mcpServers", "a")) == 3
+
+
+@pytest.mark.parametrize("written", ['"sérver"', '"s' + chr(92) + 'u00e9rver"'])
+def test_key_line_non_ascii(written: str) -> None:
+    assert config.key_line('{"mcpServers": {\n' + written + ": {}}}", ("mcpServers", "sérver")) == 2
+
+
+def test_key_line_ignores_strings_and_arrays() -> None:
+    text = '{\n"x": "\\"hooks\\": 1",\n"list": [{"hooks": 1}],\n"hooks": {}\n}'
+    assert config.key_line(text, ("hooks",)) == 4
+
+
+def test_key_line_absent_or_unscannable() -> None:
+    assert config.key_line('{"a": 1}', ("hooks",)) is None
+    assert config.key_line('{"a": [{"b": 1}]}', ("a", "b")) is None
+    assert config.key_line('{"b": "unterminated', ("b", "c")) is None
