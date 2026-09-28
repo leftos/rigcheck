@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from rigcheck.discover import MAX_BYTES, discover, memory_dir
-from rigcheck.model import Kind, Layer
+from rigcheck.model import DEFAULT_WINDOW, Kind, Layer
 from rigcheck.rules import REGISTRY
 from support import FIXTURES, Workspace, git_add, run_json, symlink_or_skip, write
 
@@ -81,7 +81,7 @@ def test_prepare_resolves_plugin_install_paths(workspace: Workspace, tmp_path: P
     write(home / ".claude" / "plugins" / "cache" / "demo" / "skills" / "x" / "SKILL.md", "---\nname: x\n---\n")
     monkeypatch.setattr("test_rule_catalog.FIXTURES", fixtures)
     rig = _prepare("demo-rule", "bad", workspace)
-    artifacts = [artifact for artifact in discover(rig, workspace.home).artifacts if artifact.layer is Layer.PLUGIN]
+    artifacts = [artifact for artifact in discover(rig, workspace.home, DEFAULT_WINDOW).artifacts if artifact.layer is Layer.PLUGIN]
     expected = workspace.home / ".claude" / "plugins" / "cache" / "demo" / "skills" / "x" / "SKILL.md"
     assert [artifact.path for artifact in artifacts] == [expected]
     assert artifacts[0].kind is Kind.SKILL

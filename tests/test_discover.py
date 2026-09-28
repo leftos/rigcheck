@@ -8,7 +8,7 @@ import pytest
 
 from rigcheck import engine
 from rigcheck.discover import discover, encode_project, memory_dir
-from rigcheck.model import Artifact, Kind, Layer, LoadClass, Rig
+from rigcheck.model import DEFAULT_WINDOW, Artifact, Kind, Layer, LoadClass, Rig
 from rigcheck.rules import REGISTRY
 from support import Workspace, symlink_or_skip, write
 
@@ -50,7 +50,7 @@ def test_user_enabled_plugin_contributes_its_components(workspace: Workspace) ->
     repo = workspace.rig()
     _install_plugin(workspace, {"scope": "user"})
     _enable(workspace.home / ".claude" / "settings.json", enabled=True)
-    artifacts = _plugin_artifacts(discover(repo, workspace.home))
+    artifacts = _plugin_artifacts(discover(repo, workspace.home, DEFAULT_WINDOW))
     kinds = sorted(artifact.kind.value for artifact in artifacts)
     assert kinds == ["agent", "command", "hooks-config", "mcp-config", "output-style", "plugin-manifest", "skill"]
     assert {artifact.plugin for artifact in artifacts} == {PLUGIN}
@@ -60,7 +60,7 @@ def test_plugin_output_styles_are_discovered_on_demand(workspace: Workspace) -> 
     repo = workspace.rig()
     install = _install_plugin(workspace, {"scope": "user"})
     _enable(workspace.home / ".claude" / "settings.json", enabled=True)
-    artifact = _artifact(discover(repo, workspace.home), install / "output-styles" / "terse.md")
+    artifact = _artifact(discover(repo, workspace.home, DEFAULT_WINDOW), install / "output-styles" / "terse.md")
     assert (artifact.kind, artifact.layer, artifact.load_class) == (Kind.OUTPUT_STYLE, Layer.PLUGIN, LoadClass.ON_DEMAND)
     assert artifact.plugin == PLUGIN
 
@@ -70,7 +70,7 @@ def test_project_settings_disable_a_user_enabled_plugin(workspace: Workspace) ->
     _install_plugin(workspace, {"scope": "user"})
     _enable(workspace.home / ".claude" / "settings.json", enabled=True)
     _enable(repo / ".claude" / "settings.json", enabled=False)
-    assert _plugin_artifacts(discover(repo, workspace.home)) == []
+    assert _plugin_artifacts(discover(repo, workspace.home, DEFAULT_WINDOW)) == []
 
 
 def test_local_settings_override_project_settings(workspace: Workspace) -> None:
@@ -78,13 +78,13 @@ def test_local_settings_override_project_settings(workspace: Workspace) -> None:
     _install_plugin(workspace, {"scope": "user"})
     _enable(repo / ".claude" / "settings.json", enabled=False)
     _enable(repo / ".claude" / "settings.local.json", enabled=True)
-    assert _plugin_artifacts(discover(repo, workspace.home))
+    assert _plugin_artifacts(discover(repo, workspace.home, DEFAULT_WINDOW))
 
 
 def test_plugin_not_enabled_anywhere_is_ignored(workspace: Workspace) -> None:
     repo = workspace.rig()
     _install_plugin(workspace, {"scope": "user"})
-    assert _plugin_artifacts(discover(repo, workspace.home)) == []
+    assert _plugin_artifacts(discover(repo, workspace.home, DEFAULT_WINDOW)) == []
 
 
 def test_project_install_for_another_project_is_ignored(workspace: Workspace) -> None:
@@ -92,14 +92,14 @@ def test_project_install_for_another_project_is_ignored(workspace: Workspace) ->
     other = workspace.rig("other")
     _install_plugin(workspace, {"scope": "project", "projectPath": str(other)})
     _enable(workspace.home / ".claude" / "settings.json", enabled=True)
-    assert _plugin_artifacts(discover(repo, workspace.home)) == []
+    assert _plugin_artifacts(discover(repo, workspace.home, DEFAULT_WINDOW)) == []
 
 
 def test_project_install_for_this_project_is_used(workspace: Workspace) -> None:
     repo = workspace.rig()
     _install_plugin(workspace, {"scope": "local", "projectPath": str(repo)})
     _enable(workspace.home / ".claude" / "settings.json", enabled=True)
-    assert _plugin_artifacts(discover(repo, workspace.home))
+    assert _plugin_artifacts(discover(repo, workspace.home, DEFAULT_WINDOW))
 
 
 def test_missing_install_path_is_a_problem(workspace: Workspace) -> None:
@@ -107,14 +107,14 @@ def test_missing_install_path_is_a_problem(workspace: Workspace) -> None:
     installed = {"version": 2, "plugins": {PLUGIN: [{"scope": "user", "installPath": str(workspace.home / "gone")}]}}
     write(workspace.home / ".claude" / "plugins" / "installed_plugins.json", json.dumps(installed))
     _enable(workspace.home / ".claude" / "settings.json", enabled=True)
-    rig = discover(repo, workspace.home)
+    rig = discover(repo, workspace.home, DEFAULT_WINDOW)
     assert any("does not exist" in problem for problem in rig.problems)
 
 
 def test_malformed_installed_plugins_becomes_a_discovery_error_finding(workspace: Workspace) -> None:
     repo = workspace.rig()
     write(workspace.home / ".claude" / "plugins" / "installed_plugins.json", "{not json")
-    rig = discover(repo, workspace.home)
+    rig = discover(repo, workspace.home, DEFAULT_WINDOW)
     findings = engine.run(rig, REGISTRY.values())
     errors = [finding for finding in findings if finding.rule_id == "discovery-error"]
     assert len(errors) == 1
@@ -133,7 +133,7 @@ def test_memory_folder_for_this_project_only(workspace: Workspace) -> None:
     write(memory / "MEMORY.md", "- [Topic](topic.md)\n")
     write(memory / "topic.md", "Details.\n")
     write(memory_dir(workspace.rig("other"), workspace.home) / "MEMORY.md", "Other project.\n")
-    memory_artifacts = [artifact for artifact in discover(repo, workspace.home).artifacts if artifact.layer is Layer.MEMORY]
+    memory_artifacts = [artifact for artifact in discover(repo, workspace.home, DEFAULT_WINDOW).artifacts if artifact.layer is Layer.MEMORY]
     by_name = {artifact.path.name: artifact for artifact in memory_artifacts}
     assert set(by_name) == {"MEMORY.md", "topic.md"}
     assert all(artifact.path.parent == memory for artifact in memory_artifacts)
@@ -148,7 +148,7 @@ def test_rules_load_every_turn_unless_path_scoped(workspace: Workspace) -> None:
     write(repo / ".claude" / "rules" / "broken.md", "---\npaths:\n  - src/**\ndescription: 'a' b: 'c'\n---\nBroken.\n")
     write(repo / ".claude" / "rules" / "nonstandard.md", "---\npaths:\n  - src/**\ndescription: a: b\n---\nLoads anyway.\n")
     write(workspace.home / ".claude" / "rules" / "mine.md", "Mine.\n")
-    artifacts = _by_name(discover(repo, workspace.home))
+    artifacts = _by_name(discover(repo, workspace.home, DEFAULT_WINDOW))
     assert artifacts["always.md"].load_class is LoadClass.EVERY_TURN
     assert artifacts["scoped.md"].load_class is LoadClass.ON_DEMAND
     assert artifacts["broken.md"].load_class is LoadClass.EVERY_TURN
@@ -167,7 +167,7 @@ def test_rule_folder_link_outside_repo_scoped_by_paths_is_not_loaded(workspace: 
     repo = workspace.rig()
     external = write(workspace.home / "elsewhere" / "rules" / "a.md", "---\npaths:\n  - src/**\n---\nScoped.\n")
     _rule_link(repo, "shared", external.parent)
-    artifact = _artifact(discover(repo, workspace.home), repo / ".claude" / "rules" / "shared" / "a.md")
+    artifact = _artifact(discover(repo, workspace.home, DEFAULT_WINDOW), repo / ".claude" / "rules" / "shared" / "a.md")
     assert (artifact.layer, artifact.load_class) == (Layer.REPO, LoadClass.NOT_LOADED)
 
 
@@ -175,7 +175,7 @@ def test_rule_folder_link_outside_repo_without_paths_loads_every_turn(workspace:
     repo = workspace.rig()
     external = write(workspace.home / "elsewhere" / "rules" / "b.md", "No frontmatter.\n")
     _rule_link(repo, "shared", external.parent)
-    artifact = _artifact(discover(repo, workspace.home), repo / ".claude" / "rules" / "shared" / "b.md")
+    artifact = _artifact(discover(repo, workspace.home, DEFAULT_WINDOW), repo / ".claude" / "rules" / "shared" / "b.md")
     assert (artifact.layer, artifact.load_class) == (Layer.REPO, LoadClass.EVERY_TURN)
 
 
@@ -183,7 +183,7 @@ def test_rule_folder_link_inside_repo_keeps_paths_scoping(workspace: Workspace) 
     repo = workspace.rig()
     write(repo / "docs" / "rules" / "c.md", "---\npaths:\n  - src/**\n---\nScoped.\n")
     _rule_link(repo, "local", repo / "docs" / "rules")
-    artifact = _artifact(discover(repo, workspace.home), repo / ".claude" / "rules" / "local" / "c.md")
+    artifact = _artifact(discover(repo, workspace.home, DEFAULT_WINDOW), repo / ".claude" / "rules" / "local" / "c.md")
     assert (artifact.layer, artifact.load_class) == (Layer.REPO, LoadClass.ON_DEMAND)
 
 
@@ -191,7 +191,11 @@ def test_rule_folder_link_cycle_terminates_and_lists_each_file_once(workspace: W
     repo = workspace.rig()
     real = write(repo / ".claude" / "rules" / "real.md", "Real.\n")
     _rule_link(repo, "loop", repo / ".claude" / "rules")
-    rules = [artifact for artifact in discover(repo, workspace.home).artifacts if artifact.kind is Kind.RULE and artifact.layer is Layer.REPO]
+    rules = [
+        artifact
+        for artifact in discover(repo, workspace.home, DEFAULT_WINDOW).artifacts
+        if artifact.kind is Kind.RULE and artifact.layer is Layer.REPO
+    ]
     assert [artifact.path for artifact in rules] == [real]
 
 
@@ -199,7 +203,11 @@ def test_rule_folder_link_beside_its_target_lists_the_files_once(workspace: Work
     repo = workspace.rig()
     real = write(repo / ".claude" / "rules" / "a" / "x.md", "Real.\n")
     _rule_link(repo, "b", real.parent)
-    rules = [artifact for artifact in discover(repo, workspace.home).artifacts if artifact.kind is Kind.RULE and artifact.layer is Layer.REPO]
+    rules = [
+        artifact
+        for artifact in discover(repo, workspace.home, DEFAULT_WINDOW).artifacts
+        if artifact.kind is Kind.RULE and artifact.layer is Layer.REPO
+    ]
     assert [artifact.path for artifact in rules] == [real]
 
 
@@ -213,7 +221,7 @@ def test_rule_folder_link_to_a_subfolder_of_another_links_target_lists_each_file
     inner = write(workspace.home / "elsewhere" / "sub" / "f.md", "Inner.\n")
     _rule_link(repo, "a", outer.parent)
     _rule_link(repo, "b", inner.parent)
-    paths = _repo_rule_paths(discover(repo, workspace.home))
+    paths = _repo_rule_paths(discover(repo, workspace.home, DEFAULT_WINDOW))
     assert sorted(path.resolve() for path in paths) == sorted([outer.resolve(), inner.resolve()])
     assert repo / ".claude" / "rules" / "b" / "f.md" in paths
 
@@ -224,7 +232,7 @@ def test_rule_folder_link_to_a_parent_of_another_links_target_lists_each_file_on
     inner = write(workspace.home / "elsewhere" / "sub" / "f.md", "Inner.\n")
     _rule_link(repo, "a", inner.parent)
     _rule_link(repo, "b", outer.parent)
-    paths = _repo_rule_paths(discover(repo, workspace.home))
+    paths = _repo_rule_paths(discover(repo, workspace.home, DEFAULT_WINDOW))
     assert sorted(path.resolve() for path in paths) == sorted([outer.resolve(), inner.resolve()])
     assert repo / ".claude" / "rules" / "a" / "f.md" in paths
 
@@ -245,7 +253,7 @@ def test_rule_file_link_outside_repo_scoped_by_paths_is_not_loaded(workspace: Wo
     repo = workspace.rig()
     external = write(workspace.home / "elsewhere" / "d.md", "---\npaths:\n  - src/**\n---\nScoped.\n")
     _rule_link(repo, "d.md", external)
-    artifact = _artifact(discover(repo, workspace.home), repo / ".claude" / "rules" / "d.md")
+    artifact = _artifact(discover(repo, workspace.home, DEFAULT_WINDOW), repo / ".claude" / "rules" / "d.md")
     assert (artifact.layer, artifact.load_class) == (Layer.REPO, LoadClass.NOT_LOADED)
 
 
@@ -259,7 +267,7 @@ def _junction_or_skip(link: Path, target: Path) -> None:
 def _discover_within(target: Path, home: Path, timeout: float = 10.0) -> Rig:
     """Discover in a daemon thread, so a walk that loops fails the test instead of hanging it."""
     result: list[Rig] = []
-    thread = threading.Thread(target=lambda: result.append(discover(target, home)), daemon=True)
+    thread = threading.Thread(target=lambda: result.append(discover(target, home, DEFAULT_WINDOW)), daemon=True)
     thread.start()
     thread.join(timeout)
     assert not thread.is_alive(), f"discovery did not finish within {timeout}s"
@@ -281,7 +289,7 @@ def test_rule_folder_junction_outside_repo_scoped_by_paths_is_not_loaded(workspa
     repo = workspace.rig()
     external = write(workspace.home / "elsewhere" / "rules" / "a.md", "---\npaths:\n  - src/**\n---\nScoped.\n")
     _junction_or_skip(repo / ".claude" / "rules" / "shared", external.parent)
-    artifact = _artifact(discover(repo, workspace.home), repo / ".claude" / "rules" / "shared" / "a.md")
+    artifact = _artifact(discover(repo, workspace.home, DEFAULT_WINDOW), repo / ".claude" / "rules" / "shared" / "a.md")
     assert (artifact.layer, artifact.load_class) == (Layer.REPO, LoadClass.NOT_LOADED)
 
 
@@ -289,7 +297,11 @@ def test_rule_folder_link_to_a_real_folder_loses_to_it(workspace: Workspace) -> 
     repo = workspace.rig()
     real = write(repo / ".claude" / "rules" / "z" / "x.md", "Real.\n")
     _rule_link(repo, "a", real.parent)
-    rules = [artifact for artifact in discover(repo, workspace.home).artifacts if artifact.kind is Kind.RULE and artifact.layer is Layer.REPO]
+    rules = [
+        artifact
+        for artifact in discover(repo, workspace.home, DEFAULT_WINDOW).artifacts
+        if artifact.kind is Kind.RULE and artifact.layer is Layer.REPO
+    ]
     assert [artifact.path for artifact in rules] == [real]
 
 
@@ -297,14 +309,18 @@ def test_rule_folder_link_nested_below_a_real_folder_loses_to_it(workspace: Work
     repo = workspace.rig()
     real = write(repo / ".claude" / "rules" / "b" / "c" / "y.md", "Real.\n")
     _rule_link(repo, "a/l", real.parent)
-    rules = [artifact for artifact in discover(repo, workspace.home).artifacts if artifact.kind is Kind.RULE and artifact.layer is Layer.REPO]
+    rules = [
+        artifact
+        for artifact in discover(repo, workspace.home, DEFAULT_WINDOW).artifacts
+        if artifact.kind is Kind.RULE and artifact.layer is Layer.REPO
+    ]
     assert [artifact.path for artifact in rules] == [real]
 
 
 def test_rule_folder_link_to_a_network_path_is_reported_not_loaded(workspace: Workspace) -> None:
     repo = workspace.rig()
     link = _rule_link(repo, "shared", Path(UNC_RULES))
-    rig = discover(repo, workspace.home)
+    rig = discover(repo, workspace.home, DEFAULT_WINDOW)
     artifact = _artifact(rig, link)
     assert (artifact.kind, artifact.layer, artifact.load_class) == (Kind.RULE, Layer.REPO, LoadClass.NOT_LOADED)
     rules = [item for item in rig.artifacts if item.kind is Kind.RULE and item.layer is Layer.REPO]
@@ -318,7 +334,7 @@ def test_claude_rules_dir_link_to_a_network_path_is_reported_not_loaded(workspac
     (repo / ".claude").mkdir(parents=True, exist_ok=True)
     link = repo / ".claude" / "rules"
     symlink_or_skip(link, UNC_RULES)
-    rig = discover(repo, workspace.home)
+    rig = discover(repo, workspace.home, DEFAULT_WINDOW)
     artifact = _artifact(rig, link)
     assert (artifact.kind, artifact.layer, artifact.load_class) == (Kind.RULE, Layer.REPO, LoadClass.NOT_LOADED)
     assert rig.problems == ()
@@ -332,7 +348,7 @@ def test_claude_dir_components(workspace: Workspace) -> None:
     write(repo / ".claude" / "output-styles" / "terse.md", "Terse.\n")
     write(repo / ".claude" / "settings.json", "{}\n")
     write(repo / ".mcp.json", "{}\n")
-    artifacts = _by_name(discover(repo, workspace.home))
+    artifacts = _by_name(discover(repo, workspace.home, DEFAULT_WINDOW))
     assert (artifacts["SKILL.md"].kind, artifacts["SKILL.md"].load_class) == (Kind.SKILL, LoadClass.ON_INVOKE)
     assert (artifacts["cmd.md"].kind, artifacts["cmd.md"].load_class) == (Kind.COMMAND, LoadClass.ON_INVOKE)
     assert (artifacts["helper.md"].kind, artifacts["helper.md"].load_class) == (Kind.AGENT, LoadClass.ON_INVOKE)
@@ -344,35 +360,35 @@ def test_claude_dir_components(workspace: Workspace) -> None:
 def test_agents_md_alone_loads_every_turn(workspace: Workspace) -> None:
     repo = workspace.rig()
     agents = write(repo / "AGENTS.md", "# Agents\n")
-    assert _artifact(discover(repo, workspace.home), agents).load_class is LoadClass.EVERY_TURN
+    assert _artifact(discover(repo, workspace.home, DEFAULT_WINDOW), agents).load_class is LoadClass.EVERY_TURN
 
 
 def test_agents_md_beside_claude_md_is_not_loaded(workspace: Workspace) -> None:
     repo = workspace.rig()
     write(repo / "CLAUDE.md", "# Project\n")
     agents = write(repo / "AGENTS.md", "# Agents\n")
-    assert _artifact(discover(repo, workspace.home), agents).load_class is LoadClass.NOT_LOADED
+    assert _artifact(discover(repo, workspace.home, DEFAULT_WINDOW), agents).load_class is LoadClass.NOT_LOADED
 
 
 def test_agents_md_below_a_parent_claude_md_is_not_loaded(workspace: Workspace) -> None:
     repo = workspace.rig()
     write(repo.parent / "CLAUDE.md", "# Parent\n")
     agents = write(repo / "AGENTS.md", "# Agents\n")
-    assert _artifact(discover(repo, workspace.home), agents).load_class is LoadClass.NOT_LOADED
+    assert _artifact(discover(repo, workspace.home, DEFAULT_WINDOW), agents).load_class is LoadClass.NOT_LOADED
 
 
 def test_agents_md_beside_claude_local_md_is_not_loaded(workspace: Workspace) -> None:
     repo = workspace.rig()
     write(repo / "CLAUDE.local.md", "Mine.\n")
     agents = write(repo / "AGENTS.md", "# Agents\n")
-    assert _artifact(discover(repo, workspace.home), agents).load_class is LoadClass.NOT_LOADED
+    assert _artifact(discover(repo, workspace.home, DEFAULT_WINDOW), agents).load_class is LoadClass.NOT_LOADED
 
 
 def test_agents_md_imported_by_claude_md_loads(workspace: Workspace) -> None:
     repo = workspace.rig()
     claude = write(repo / "CLAUDE.md", "@AGENTS.md\n")
     agents = write(repo / "AGENTS.md", "# Agents\n")
-    artifact = _artifact(discover(repo, workspace.home), agents)
+    artifact = _artifact(discover(repo, workspace.home, DEFAULT_WINDOW), agents)
     assert artifact.load_class is LoadClass.EVERY_TURN
     assert artifact.imported_from == claude
     assert artifact.import_depth == 1
@@ -384,7 +400,7 @@ def test_import_depth_five_is_recorded_not_loaded(workspace: Workspace) -> None:
     for hop in range(1, 6):
         write(repo / f"hop{hop}.md", f"@hop{hop + 1}.md\n")
     write(repo / "hop6.md", "Never reached.\n")
-    artifacts = _by_name(discover(repo, workspace.home))
+    artifacts = _by_name(discover(repo, workspace.home, DEFAULT_WINDOW))
     assert (artifacts["hop4.md"].import_depth, artifacts["hop4.md"].load_class) == (4, LoadClass.EVERY_TURN)
     assert (artifacts["hop5.md"].import_depth, artifacts["hop5.md"].load_class) == (5, LoadClass.NOT_LOADED)
     assert "hop6.md" not in artifacts
@@ -395,7 +411,7 @@ def test_import_cycle_terminates(workspace: Workspace) -> None:
     write(repo / "CLAUDE.md", "@a.md\n")
     write(repo / "a.md", "@b.md\n")
     write(repo / "b.md", "@a.md @CLAUDE.md\n")
-    names = sorted(artifact.path.name for artifact in discover(repo, workspace.home).artifacts)
+    names = sorted(artifact.path.name for artifact in discover(repo, workspace.home, DEFAULT_WINDOW).artifacts)
     assert names == ["CLAUDE.md", "a.md", "b.md"]
 
 
@@ -404,7 +420,7 @@ def test_imports_in_code_and_comments_are_not_followed(workspace: Workspace) -> 
     write(repo / "CLAUDE.md", "`@a.md`\n\n```\n@b.md\n```\n\n<!-- @c.md -->\n")
     for name in ("a.md", "b.md", "c.md"):
         write(repo / name, "Not imported.\n")
-    names = [artifact.path.name for artifact in discover(repo, workspace.home).artifacts]
+    names = [artifact.path.name for artifact in discover(repo, workspace.home, DEFAULT_WINDOW).artifacts]
     assert names == ["CLAUDE.md"]
 
 
@@ -413,7 +429,7 @@ def test_user_claude_md_and_tilde_imports(workspace: Workspace) -> None:
     user = write(workspace.home / ".claude" / "CLAUDE.md", "@~/.claude/extra.md\n")
     extra = workspace.home / ".claude" / "extra.md"
     write(extra, "Extra.\n")
-    rig = discover(repo, workspace.home)
+    rig = discover(repo, workspace.home, DEFAULT_WINDOW)
     assert (_artifact(rig, user).layer, _artifact(rig, user).load_class) == (Layer.USER, LoadClass.EVERY_TURN)
     assert (_artifact(rig, extra).layer, _artifact(rig, extra).imported_from) == (Layer.USER, user)
 
@@ -423,7 +439,7 @@ def test_nested_claude_md_is_on_demand_and_skips_vendor_dirs(workspace: Workspac
     write(repo / "CLAUDE.md", "# Root\n")
     nested = write(repo / "src" / "api" / "CLAUDE.md", "# API\n")
     write(repo / "node_modules" / "pkg" / "CLAUDE.md", "# Vendor\n")
-    rig = discover(repo, workspace.home)
+    rig = discover(repo, workspace.home, DEFAULT_WINDOW)
     nested_artifacts = [artifact for artifact in rig.artifacts if artifact.kind is Kind.NESTED_INSTRUCTIONS]
     assert [artifact.path for artifact in nested_artifacts] == [nested]
     assert nested_artifacts[0].load_class is LoadClass.ON_DEMAND
@@ -437,7 +453,7 @@ def test_home_target_reads_only_the_claude_folder(workspace: Workspace) -> None:
     write(workspace.home / "AppData" / "x" / "CLAUDE.md", "# AppData\n")
     user_root = write(workspace.home / ".claude" / "CLAUDE.md", "# User\n")
     rule = write(workspace.home / ".claude" / "rules" / "r.md", "Rule.\n")
-    rig = discover(workspace.home, workspace.home)
+    rig = discover(workspace.home, workspace.home, DEFAULT_WINDOW)
     assert [artifact for artifact in rig.artifacts if artifact.layer is Layer.REPO] == []
     assert _artifact(rig, user_root).kind is Kind.INSTRUCTIONS
     assert _artifact(rig, user_root).layer is Layer.USER
@@ -449,7 +465,7 @@ def test_home_subfolder_still_walks_nested(workspace: Workspace) -> None:
     notes = workspace.home / "notes"
     write(notes / "CLAUDE.md", "# Notes\n")
     nested = write(notes / "sub" / "CLAUDE.md", "# Sub\n")
-    rig = discover(notes, workspace.home)
+    rig = discover(notes, workspace.home, DEFAULT_WINDOW)
     nested_artifacts = [artifact for artifact in rig.artifacts if artifact.kind is Kind.NESTED_INSTRUCTIONS]
     assert [artifact.path for artifact in nested_artifacts] == [nested]
     assert nested_artifacts[0].layer is Layer.REPO
@@ -463,7 +479,7 @@ def test_walk_does_not_enter_junctions(workspace: Workspace) -> None:
     result = subprocess.run(["cmd", "/c", "mklink", "/J", str(repo / "link"), str(workspace.home / "elsewhere")], capture_output=True, check=False)  # noqa: S603, S607 - fixed test command
     if result.returncode != 0:
         pytest.skip("cannot create a junction here")
-    nested = [artifact for artifact in discover(repo, workspace.home).artifacts if artifact.kind is Kind.NESTED_INSTRUCTIONS]
+    nested = [artifact for artifact in discover(repo, workspace.home, DEFAULT_WINDOW).artifacts if artifact.kind is Kind.NESTED_INSTRUCTIONS]
     assert nested == []
 
 
@@ -471,6 +487,6 @@ def test_agents_local_and_override_are_recorded_not_loaded(workspace: Workspace)
     repo = workspace.rig()
     write(repo / "AGENTS.local.md", "Local.\n")
     write(repo / "AGENTS.override.md", "Override.\n")
-    artifacts = _by_name(discover(repo, workspace.home))
+    artifacts = _by_name(discover(repo, workspace.home, DEFAULT_WINDOW))
     assert artifacts["AGENTS.local.md"].load_class is LoadClass.NOT_LOADED
     assert artifacts["AGENTS.override.md"].load_class is LoadClass.NOT_LOADED

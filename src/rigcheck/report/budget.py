@@ -76,6 +76,15 @@ class _Entry:
     disabled: bool
 
 
+def window_label(window: int) -> str:
+    """Show a context window as ``200k`` or ``1m`` when round, else with thousands separators."""
+    if window % 1_000_000 == 0:
+        return f"{window // 1_000_000}m"
+    if window % 1_000 == 0:
+        return f"{window // 1_000}k"
+    return f"{window:,}"
+
+
 def loaded_text(rig: Rig, artifact: Artifact) -> str:
     """Return the part of an artifact's text that enters the context when it loads.
 
@@ -144,12 +153,11 @@ def _every_turn(rig: Rig) -> EveryTurn:
     return EveryTurn(total_est=sum(source.tokens_est for source in sources), sources=tuple(sources))
 
 
-def compute(rig: Rig, window: int) -> Budget:
+def compute(rig: Rig) -> Budget:
     """Estimate what the rig costs the context: every-turn files, the skill listing and agent descriptions.
 
     Args:
-        rig: The discovered rig.
-        window: The model's context window, in tokens; the skill listing's budget is 1% of it.
+        rig: The discovered rig; the skill listing's budget is 1% of its context window.
 
     Returns:
         The budget report.
@@ -157,8 +165,8 @@ def compute(rig: Rig, window: int) -> Budget:
     skills = [artifact for artifact in rig.artifacts if artifact.kind in _LISTED_KINDS]
     agents = [artifact for artifact in rig.artifacts if artifact.kind is Kind.AGENT]
     return Budget(
-        window=window,
+        window=rig.window,
         every_turn=_every_turn(rig),
-        skill_listing=_listing(rig, skills, window // 100, LISTING_DETAIL_CHARS),
+        skill_listing=_listing(rig, skills, rig.window // 100, LISTING_DETAIL_CHARS),
         agent_descriptions=_listing(rig, agents, AGENT_DESCRIPTIONS_BUDGET, None),
     )

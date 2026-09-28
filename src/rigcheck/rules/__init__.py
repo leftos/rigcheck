@@ -2,7 +2,7 @@
 
 from collections.abc import Callable, Iterable
 
-from rigcheck.model import Artifact, Finding, Rig, Rule, Severity
+from rigcheck.model import Artifact, Finding, LoadClass, Rig, Rule, Severity
 
 Check = Callable[[Rig], Iterable[Finding]]
 
@@ -51,9 +51,24 @@ def emit(rule_id: str, artifact: Artifact, message: str, line: int | None) -> Fi
     return Finding(rule_id, meta.severity, artifact.path, line, message, meta.fix, artifact.layer, artifact.load_class)
 
 
-# Area modules register their rules on import; they need `rule` and `emit` defined above.
+def emit_setup(rule_id: str, message: str) -> Finding:
+    """Build a finding of a registered rule about the whole setup rather than one file.
+
+    Args:
+        rule_id: The registered rule emitting the finding.
+        message: What is wrong with the setup.
+
+    Returns:
+        The finding, with no path, line or layer, loading every turn, and severity and fix taken from the rule.
+    """
+    meta = REGISTRY[rule_id]
+    return Finding(rule_id, meta.severity, None, None, message, meta.fix, None, LoadClass.EVERY_TURN)
+
+
+# Area modules register their rules on import; they need `rule`, `emit` and `emit_setup` defined above.
 import rigcheck.rules.agent_refs  # noqa: E402 - imported for its registrations
 import rigcheck.rules.agents  # noqa: E402 - imported for its registrations
+import rigcheck.rules.budget  # noqa: E402 - imported for its registrations
 import rigcheck.rules.commands  # noqa: E402 - imported for its registrations
 import rigcheck.rules.components  # noqa: E402 - imported for its registrations
 import rigcheck.rules.instructions  # noqa: E402 - imported for its registrations

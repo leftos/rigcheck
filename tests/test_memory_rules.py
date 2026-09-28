@@ -1,6 +1,6 @@
 from rigcheck import engine
 from rigcheck.discover import MEMORY_INDEX_BYTES, discover, memory_dir
-from rigcheck.model import Finding
+from rigcheck.model import DEFAULT_WINDOW, Finding
 from rigcheck.rules import REGISTRY
 from support import Workspace, write
 
@@ -11,7 +11,7 @@ def _findings(workspace: Workspace, files: dict[str, str]) -> list[Finding]:
     memory = memory_dir(repo, workspace.home)
     for name, text in files.items():
         write(memory / name, text)
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     return [finding for finding in findings if finding.rule_id.startswith("memory-")]
 
 

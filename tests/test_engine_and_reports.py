@@ -7,7 +7,7 @@ import pytest
 from rigcheck import engine
 from rigcheck.cli import main
 from rigcheck.discover import discover
-from rigcheck.model import Finding, Layer, LoadClass, Rig, Rule, Severity
+from rigcheck.model import DEFAULT_WINDOW, Finding, Layer, LoadClass, Rig, Rule, Severity
 from rigcheck.report import budget, terminal
 from rigcheck.rules import REGISTRY
 from support import Workspace, run_cli, run_json, write
@@ -29,7 +29,7 @@ def _bad_rig(workspace: Workspace) -> Path:
 
 
 def test_raising_rule_becomes_internal_error(workspace: Workspace) -> None:
-    rig = discover(workspace.rig(), workspace.home)
+    rig = discover(workspace.rig(), workspace.home, DEFAULT_WINDOW)
     stub = Rule("stub", "core", Severity.WARN, "Stub.", "None.", ("test",), _raising)
     findings = engine.run(rig, [stub, REGISTRY["claude-never-reads"]])
     assert [finding.rule_id for finding in findings] == ["internal-error"]
@@ -86,9 +86,9 @@ def test_text_report_without_tty_has_no_ansi(workspace: Workspace, capsys: pytes
 
 
 def test_text_report_colors_only_when_asked(workspace: Workspace) -> None:
-    rig = discover(_bad_rig(workspace), workspace.home)
+    rig = discover(_bad_rig(workspace), workspace.home, DEFAULT_WINDOW)
     findings = engine.run(rig, REGISTRY.values())
-    report = budget.compute(rig, 200_000)
+    report = budget.compute(rig)
     assert ANSI.search(terminal.render(rig, findings, report, color=True))
     assert not ANSI.search(terminal.render(rig, findings, report, color=False))
 
@@ -142,13 +142,13 @@ def test_text_report_marks_a_listing_over_budget(workspace: Workspace, capsys: p
     assert listing.endswith("  over budget")
     agents = next(line for line in lines if line.startswith("  agent descriptions"))
     assert "over budget" not in agents
-    rig = discover(repo, workspace.home)
-    colored = terminal.render(rig, [], budget.compute(rig, 1_500), color=True)
+    rig = discover(repo, workspace.home, 1_500)
+    colored = terminal.render(rig, [], budget.compute(rig), color=True)
     assert "\x1b[33m" in next(line for line in colored.splitlines() if line.startswith("  skill listing"))
 
 
 def test_user_layer_paths_display_with_tilde(workspace: Workspace) -> None:
-    rig = discover(workspace.rig(), workspace.home)
+    rig = discover(workspace.rig(), workspace.home, DEFAULT_WINDOW)
     path = workspace.home / ".claude" / "CLAUDE.md"
     assert terminal.display_path(rig, path, Layer.USER) == "~/.claude/CLAUDE.md"
 

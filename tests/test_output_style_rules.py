@@ -7,7 +7,7 @@ import pytest
 
 from rigcheck import engine
 from rigcheck.discover import discover
-from rigcheck.model import Kind, Layer
+from rigcheck.model import DEFAULT_WINDOW, Kind, Layer
 from rigcheck.rules import REGISTRY
 from support import Workspace, write
 
@@ -34,7 +34,7 @@ def _write_style(workspace: Workspace, text: str) -> Path:
 
 
 def _findings(workspace: Workspace, rig: Path, rule_ids: tuple[str, ...]) -> list[tuple[str, str, int | None]]:
-    findings = engine.run(discover(rig, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(rig, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     return [(finding.rule_id, finding.message, finding.line) for finding in findings if finding.rule_id in rule_ids]
 
 
@@ -48,7 +48,7 @@ def _frontmatter(workspace: Workspace, frontmatter: str) -> list[tuple[str, str,
 
 def _styles(rig: Path, workspace: Workspace) -> list[tuple[Layer, str]]:
     """Return the layer and file name of every output style the rig discovers."""
-    artifacts = discover(rig, workspace.home).artifacts
+    artifacts = discover(rig, workspace.home, DEFAULT_WINDOW).artifacts
     return [(artifact.layer, artifact.path.name) for artifact in artifacts if artifact.kind is Kind.OUTPUT_STYLE]
 
 
@@ -151,6 +151,6 @@ def test_crlf_yaml_claude_code_rejects_still_drops_coding(workspace: Workspace) 
 
 def test_style_yaml_nonstandard_is_reported(workspace: Workspace) -> None:
     rig = _write_style(workspace, _file("name: Terse\ndescription: Terse: short replies.\n"))
-    findings = engine.run(discover(rig, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(rig, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     reported = {finding.rule_id for finding in findings if finding.path is not None and finding.path.name == STYLE.name}
     assert reported == {"frontmatter-yaml-nonstandard", DROP}

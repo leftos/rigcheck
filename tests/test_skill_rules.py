@@ -8,7 +8,7 @@ import pytest
 
 from rigcheck import engine
 from rigcheck.discover import discover
-from rigcheck.model import Layer
+from rigcheck.model import DEFAULT_WINDOW, Layer
 from rigcheck.report.budget import LISTING_DETAIL_CHARS
 from rigcheck.rules import REGISTRY
 from support import Workspace, git_add, symlink_or_skip, write
@@ -24,7 +24,7 @@ def _file(frontmatter: str) -> str:
 
 def _run(workspace: Workspace, rule_id: str) -> list[tuple[str, int | None]]:
     repo = workspace.rig()
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     return [(finding.message, finding.line) for finding in findings if finding.rule_id == rule_id]
 
 
@@ -139,7 +139,7 @@ def test_unknown_key_in_a_plugin_skill_fires(workspace: Workspace) -> None:
     installed = {"version": 2, "plugins": {PLUGIN: [{"scope": "user", "installPath": str(install)}]}}
     write(workspace.home / ".claude" / "plugins" / "installed_plugins.json", json.dumps(installed))
     write(workspace.home / ".claude" / "settings.json", json.dumps({"enabledPlugins": {PLUGIN: True}}))
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     fired = [finding for finding in findings if finding.rule_id == "skill-key-unknown"]
     assert [(finding.layer, finding.message, finding.line) for finding in fired] == [(Layer.PLUGIN, _unknown("tags", None, 4)[0], 4)]
 
@@ -238,7 +238,7 @@ def _bundle(workspace: Workspace, files: dict[str, str]) -> list[tuple[str, str,
     folder = repo / SKILL.parent
     for relative, text in files.items():
         write(folder / relative, text)
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     return [
         (finding.rule_id, os.path.relpath(finding.path, folder).replace("\\", "/"), finding.message, finding.line)
         for finding in findings
@@ -571,7 +571,7 @@ def test_skill_file_binary_linked_markdown_does_not_crash(workspace: Workspace) 
     binary.write_bytes(b"\x00\xff\xfe[x](gone.md)\x00\x89PNG\r\n")
     write(repo / "CLAUDE.md", "# Project\n")
     write(repo / SKILL, SKILL_HEAD + "[ref](reference.md)\n")
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     assert [finding.message for finding in findings if finding.rule_id == "internal-error"] == []
 
 
@@ -595,7 +595,7 @@ def test_skill_link_broken_link_in_a_plugin_skill_fires(workspace: Workspace) ->
     installed = {"version": 2, "plugins": {PLUGIN: [{"scope": "user", "installPath": str(install)}]}}
     write(workspace.home / ".claude" / "plugins" / "installed_plugins.json", json.dumps(installed))
     write(workspace.home / ".claude" / "settings.json", json.dumps({"enabledPlugins": {PLUGIN: True}}))
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     fired = [finding for finding in findings if finding.rule_id in LINK_RULES]
     assert [(finding.rule_id, finding.layer, finding.message, finding.line) for finding in fired] == [
         ("skill-link-broken", Layer.PLUGIN, "the link missing.md points at no file", 6)

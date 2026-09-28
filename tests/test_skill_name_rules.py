@@ -7,7 +7,7 @@ import pytest
 
 from rigcheck import engine
 from rigcheck.discover import discover
-from rigcheck.model import Layer
+from rigcheck.model import DEFAULT_WINDOW, Layer
 from rigcheck.rules import REGISTRY
 from support import Workspace, write
 
@@ -28,7 +28,7 @@ def _skill(folder: str) -> Path:
 def _run(workspace: Workspace, rule_id: str) -> list[Found]:
     repo = workspace.rig()
     write(repo / "CLAUDE.md", "# Project\n")
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     return [(finding.layer, finding.message, finding.line) for finding in findings if finding.rule_id == rule_id]
 
 

@@ -6,6 +6,7 @@ import pytest
 
 from rigcheck import engine
 from rigcheck.discover import discover
+from rigcheck.model import DEFAULT_WINDOW
 from rigcheck.rules import REGISTRY
 from support import Workspace, write
 
@@ -16,7 +17,7 @@ HEAD = "---\nname: demo\ndescription: Demo skill.\n---\n\n"
 
 def _run(workspace: Workspace, rule_id: str) -> list[tuple[str, int | None]]:
     repo = workspace.rig()
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     return [(finding.message, finding.line) for finding in findings if finding.rule_id == rule_id]
 
 
