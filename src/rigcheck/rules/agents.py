@@ -251,6 +251,23 @@ def agent_key_unknown(rig: Rig) -> Iterator[Finding]:
             yield emit("agent-key-unknown", artifact, message, line)
 
 
+@rule(
+    "agent-key-ignored-in-plugin",
+    "core",
+    Severity.WARN,
+    "Remove the key, or move the agent out of the plugin, if it runs as a subagent: Claude Code ignores this key for a plugin's subagents.",
+    ("official:AG5", "official:PL3", "rigcheck:agent-values-probe"),
+)
+def agent_key_ignored_in_plugin(rig: Rig) -> Iterator[Finding]:
+    """A plugin agent's key Claude Code ignores when the agent runs as a subagent."""
+    for artifact, parsed, data in loaded_agents(rig):
+        if artifact.layer is not Layer.PLUGIN:
+            continue
+        for key in (key for key in data if isinstance(key, str) and key in _PLUGIN_IGNORED):
+            message = f"{key} is ignored when a plugin's agent runs as a subagent"
+            yield emit("agent-key-ignored-in-plugin", artifact, message, parsed.key_lines.get(key, 1))
+
+
 def _check_model(key: str, value: Any) -> Problem | None:
     if isinstance(value, str) and (value in MODEL_ALIASES or value.startswith("claude-")):
         return None

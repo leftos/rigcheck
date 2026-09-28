@@ -12,6 +12,7 @@ from support import Workspace, write
 AGENT = Path(".claude") / "agents" / "helper.md"
 PLUGIN = "tools@market"
 AGENT_RULES = ("agent-skipped", "agent-key-unknown", "agent-value-invalid", "agent-value-case")
+PLUGIN_AGENT_RULES = (*AGENT_RULES, "agent-key-ignored-in-plugin")
 VALID = "name: helper\ndescription: Helps.\n"
 
 DEBUGGER = (
@@ -331,4 +332,59 @@ def test_plugin_agent_skips_the_keys_claude_code_ignores_there(workspace: Worksp
     message = 'color "Red" is not valid (did you mean "red"?); Claude Code ignores it'
     assert [(finding.layer, finding.rule_id, finding.message, finding.line) for finding in fired] == [
         (Layer.PLUGIN, "agent-value-invalid", message, 6)
+    ]
+
+
+def _install_plugin_agent(workspace: Workspace, text: str) -> None:
+    """Install a plugin whose one agent holds ``text`` and enable it in the fake home."""
+    install = workspace.home / "plugin-cache" / "tools"
+    write(install / "agents" / "lint.md", text)
+    write(install / ".claude-plugin" / "plugin.json", json.dumps({"name": "tools"}))
+    installed = {"version": 2, "plugins": {PLUGIN: [{"scope": "user", "installPath": str(install)}]}}
+    write(workspace.home / ".claude" / "plugins" / "installed_plugins.json", json.dumps(installed))
+    write(workspace.home / ".claude" / "settings.json", json.dumps({"enabledPlugins": {PLUGIN: True}}))
+
+
+def _plugin_agent_findings(workspace: Workspace, text: str) -> list[tuple[str, str, int | None]]:
+    repo = workspace.rig()
+    write(repo / "CLAUDE.md", "# Project\n")
+    _install_plugin_agent(workspace, text)
+    return _run(workspace, PLUGIN_AGENT_RULES)
+
+
+def test_ignored_in_plugin_keys_are_reported(workspace: Workspace) -> None:
+    text = _file("name: lint\ndescription: Lints.\npermissionMode: plan\nhooks: {}\n")
+    expected = "is ignored when a plugin's agent runs as a subagent"
+    assert _plugin_agent_findings(workspace, text) == [
+        ("agent-key-ignored-in-plugin", f"permissionMode {expected}", 4),
+        ("agent-key-ignored-in-plugin", f"hooks {expected}", 5),
+    ]
+
+
+def test_ignored_in_plugin_keys_are_quiet_in_a_repo_agent(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    write(repo / "CLAUDE.md", "# Project\n")
+    write(repo / AGENT, _file(VALID + "permissionMode: plan\nhooks: {}\n"))
+    assert _run(workspace, PLUGIN_AGENT_RULES) == []
+
+
+def test_ignored_in_plugin_fires_on_empty_and_null_values(workspace: Workspace) -> None:
+    text = _file("name: lint\ndescription: Lints.\nmcpServers:\ninitialPrompt: ''\n")
+    expected = "is ignored when a plugin's agent runs as a subagent"
+    assert _plugin_agent_findings(workspace, text) == [
+        ("agent-key-ignored-in-plugin", f"mcpServers {expected}", 4),
+        ("agent-key-ignored-in-plugin", f"initialPrompt {expected}", 5),
+    ]
+
+
+def test_skipped_plugin_agent_has_no_ignored_in_plugin_findings(workspace: Workspace) -> None:
+    text = _file("name: lint\npermissionMode: plan\n")
+    assert _plugin_agent_findings(workspace, text) == [("agent-skipped", "no description, so Claude Code skips the agent", 1)]
+
+
+def test_ignored_in_plugin_needs_the_exact_key(workspace: Workspace) -> None:
+    text = _file("name: lint\ndescription: Lints.\npermission-mode: plan\nHooks: {}\n")
+    assert _plugin_agent_findings(workspace, text) == [
+        ("agent-key-unknown", 'unknown key "permission-mode" (did you mean "permissionMode"?); Claude Code ignores it', 4),
+        ("agent-key-unknown", 'unknown key "Hooks" (did you mean "hooks"?); Claude Code ignores it', 5),
     ]

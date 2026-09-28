@@ -1,0 +1,5 @@
+---
+name: Terse
+---
+
+Be terse.
