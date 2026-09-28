@@ -157,7 +157,8 @@ def load(rig: Rig, artifact: Artifact) -> frontmatter.Frontmatter:
     return frontmatter.parse(rig.text(artifact.path))
 
 
-def _normalise(key: str) -> str:
+def normalise_key(key: str) -> str:
+    """Return ``key`` with its case, ``-`` and ``_`` folded away, to compare key spellings that differ only in those."""
     return key.lower().replace("-", "").replace("_", "")
 
 
@@ -171,7 +172,7 @@ def unknown_key_message(key: str, known: frozenset[str]) -> str:
     Returns:
         The message, with a ``did you mean`` hint when exactly one known key is a near match of ``key``.
     """
-    matches = [candidate for candidate in known if _normalise(candidate) == _normalise(key)]
+    matches = [candidate for candidate in known if normalise_key(candidate) == normalise_key(key)]
     if len(matches) == 1:
         return f'unknown key "{key}" (did you mean "{matches[0]}"?); Claude Code ignores it'
     return f'unknown key "{key}"; Claude Code ignores it'

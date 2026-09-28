@@ -1,0 +1,5 @@
+{
+  "name": "tools",
+  "description": "Fixture plugin whose agent sets keys Claude Code ignores there.",
+  "version": "1.0.0"
+}
