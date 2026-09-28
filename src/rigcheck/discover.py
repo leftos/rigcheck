@@ -507,7 +507,7 @@ def _repo_root(target: Path) -> tuple[Path, bool]:
     return Path(output.strip()), True
 
 
-def discover(target: Path, home: Path) -> Rig:
+def discover(target: Path, home: Path, window: int) -> Rig:
     """Discover the effective setup Claude Code loads for ``target``.
 
     Problems with unreadable or malformed inputs are collected in ``Rig.problems``; discovery never raises for them.
@@ -517,6 +517,7 @@ def discover(target: Path, home: Path) -> Rig:
     Args:
         target: The directory Claude Code would start in.
         home: The home directory holding ``.claude``.
+        window: The model's context window, in tokens, carried on the rig for the rules that measure against it.
 
     Returns:
         The rig: every artifact with its layer and load class.
@@ -529,4 +530,4 @@ def discover(target: Path, home: Path) -> Rig:
     _add_claude_dirs(b)
     _add_plugins(b)
     _add_memory(b)
-    return Rig(target=target, repo_root=repo_root, home=home, artifacts=tuple(b.artifacts.values()), problems=tuple(b.problems))
+    return Rig(target=target, repo_root=repo_root, home=home, artifacts=tuple(b.artifacts.values()), problems=tuple(b.problems), window=window)

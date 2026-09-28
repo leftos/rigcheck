@@ -5,7 +5,7 @@ from pathlib import Path
 
 from rigcheck import engine
 from rigcheck.discover import discover
-from rigcheck.model import Layer
+from rigcheck.model import DEFAULT_WINDOW, Layer
 from rigcheck.rules import REGISTRY
 from support import Workspace, write
 
@@ -30,7 +30,7 @@ def _file(frontmatter: str) -> str:
 
 def _run(workspace: Workspace, rule_ids: tuple[str, ...]) -> list[tuple[str, str, int | None]]:
     repo = workspace.rig()
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     return [(finding.rule_id, finding.message, finding.line) for finding in findings if finding.rule_id in rule_ids]
 
 
@@ -216,7 +216,7 @@ def test_user_layer_agent_is_checked(workspace: Workspace) -> None:
     repo = workspace.rig()
     write(repo / "CLAUDE.md", "# Project\n")
     write(workspace.home / ".claude" / "agents" / "helper.md", _file(VALID + "model: Opus\n"))
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     fired = [(finding.layer, finding.rule_id, finding.line) for finding in findings if finding.rule_id in AGENT_RULES]
     assert fired == [(Layer.USER, "agent-value-case", 4)]
 
@@ -327,7 +327,7 @@ def test_plugin_agent_skips_the_keys_claude_code_ignores_there(workspace: Worksp
     installed = {"version": 2, "plugins": {PLUGIN: [{"scope": "user", "installPath": str(install)}]}}
     write(workspace.home / ".claude" / "plugins" / "installed_plugins.json", json.dumps(installed))
     write(workspace.home / ".claude" / "settings.json", json.dumps({"enabledPlugins": {PLUGIN: True}}))
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     fired = [finding for finding in findings if finding.rule_id in AGENT_RULES]
     message = 'color "Red" is not valid (did you mean "red"?); Claude Code ignores it'
     assert [(finding.layer, finding.rule_id, finding.message, finding.line) for finding in fired] == [

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from rigcheck import engine
 from rigcheck.discover import discover
-from rigcheck.model import Finding, Kind, Layer
+from rigcheck.model import DEFAULT_WINDOW, Finding, Kind, Layer
 from rigcheck.rules import REGISTRY
 from rigcheck.rules.components import COMMAND_KEYS, FRONTMATTER_KINDS, SKILL_KEYS, components, yaml_line
 from support import Workspace, write
@@ -22,7 +22,7 @@ def _agent_findings(workspace: Workspace, frontmatter: str) -> list[Finding]:
     repo = workspace.rig()
     write(repo / "CLAUDE.md", "# Project\n")
     write(repo / AGENT, _file(frontmatter))
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     return [finding for finding in findings if finding.rule_id == "frontmatter-yaml-nonstandard"]
 
 
@@ -32,7 +32,7 @@ def test_components_selects_kinds_in_rig_order(workspace: Workspace) -> None:
     write(repo / ".claude" / "skills" / "one" / "SKILL.md", _file("name: one\ndescription: One.\n"))
     write(repo / ".claude" / "agents" / "two.md", _file("name: two\ndescription: Two.\n"))
     write(repo / ".claude" / "rules" / "three.md", _file("paths: src/**\n"))
-    rig = discover(repo, workspace.home)
+    rig = discover(repo, workspace.home, DEFAULT_WINDOW)
     expected = [artifact for artifact in rig.artifacts if artifact.kind in FRONTMATTER_KINDS]
     assert len(expected) == 3
     assert components(rig, FRONTMATTER_KINDS) == expected
@@ -70,6 +70,6 @@ def test_plugin_layer_skill_fires(workspace: Workspace) -> None:
     installed = {"version": 2, "plugins": {PLUGIN: [{"scope": "user", "installPath": str(install)}]}}
     write(workspace.home / ".claude" / "plugins" / "installed_plugins.json", json.dumps(installed))
     write(workspace.home / ".claude" / "settings.json", json.dumps({"enabledPlugins": {PLUGIN: True}}))
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     fired = [finding for finding in findings if finding.rule_id == "frontmatter-yaml-nonstandard"]
     assert [(finding.layer, finding.line) for finding in fired] == [(Layer.PLUGIN, 3)]

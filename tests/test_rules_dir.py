@@ -7,6 +7,7 @@ import pytest
 
 from rigcheck import engine
 from rigcheck.discover import MAX_BYTES, discover
+from rigcheck.model import DEFAULT_WINDOW
 from rigcheck.rules import REGISTRY
 from support import Workspace, git_add, symlink_or_skip, write
 
@@ -16,7 +17,7 @@ UNC_RULES = r"\\server\share\rules" if os.name == "nt" else "//server/share/rule
 
 def _run(workspace: Workspace, rule_id: str) -> list[tuple[str, int | None]]:
     repo = workspace.rig()
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     return [(finding.message, finding.line) for finding in findings if finding.rule_id == rule_id]
 
 
@@ -79,7 +80,7 @@ def _fail_outside(*args: object) -> bool:
 
 def _every_rule_id(workspace: Workspace) -> list[str]:
     repo = workspace.rig()
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     return [finding.rule_id for finding in findings]
 
 

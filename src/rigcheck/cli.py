@@ -7,13 +7,12 @@ from pathlib import Path
 
 from rigcheck import __version__, engine
 from rigcheck.discover import discover
-from rigcheck.model import Severity
+from rigcheck.model import DEFAULT_WINDOW, Severity
 from rigcheck.report import budget, terminal
 from rigcheck.report import json as json_report
 from rigcheck.rules import REGISTRY
 
 USAGE_ERROR = 2
-DEFAULT_WINDOW = 200_000
 WINDOW_ERROR = "window must be a positive number of tokens, like 200k or 1m"
 
 _WINDOW = re.compile(r"([1-9][0-9]*)([km]?)", re.IGNORECASE)
@@ -58,9 +57,9 @@ def _check(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     if not target.is_dir():
         parser.error(f"not a directory: {target}")
     home = (args.home or Path.home()).resolve()
-    rig = discover(target, home)
+    rig = discover(target, home, args.window)
     findings = engine.run(rig, REGISTRY.values())
-    report = budget.compute(rig, args.window)
+    report = budget.compute(rig)
     if args.format == "json":
         output = json_report.render(rig, findings, report)
     else:

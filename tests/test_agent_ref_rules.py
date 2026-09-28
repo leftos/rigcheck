@@ -5,7 +5,7 @@ from pathlib import Path
 
 from rigcheck import engine
 from rigcheck.discover import discover
-from rigcheck.model import Layer
+from rigcheck.model import DEFAULT_WINDOW, Layer
 from rigcheck.rules import REGISTRY
 from support import Workspace, write
 
@@ -33,7 +33,7 @@ def _file(frontmatter: str) -> str:
 
 def _run(workspace: Workspace) -> Found:
     repo = workspace.rig()
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     return [(finding.rule_id, finding.message, finding.line) for finding in findings if finding.rule_id in REF_RULES]
 
 
@@ -158,7 +158,7 @@ def test_unknown_entries_at_the_cap_are_all_named(workspace: Workspace) -> None:
 def test_full_width_colon_in_a_name_skips_the_agent(workspace: Workspace) -> None:
     name = f"a{FULL_WIDTH_COLON}b"
     write(_repo(workspace) / AGENTS / "helper.md", _file(f"name: {name}\ndescription: Helps.\n"))
-    findings = engine.run(discover(workspace.rig(), workspace.home), REGISTRY.values())
+    findings = engine.run(discover(workspace.rig(), workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     fired = [(finding.rule_id, finding.message) for finding in findings if finding.rule_id == "agent-skipped"]
     assert fired == [("agent-skipped", f'name "{name}" holds ":", so Claude Code skips the agent')]
 
@@ -280,7 +280,7 @@ def test_user_agent_loses_to_the_project_agent(workspace: Workspace) -> None:
     write(_repo(workspace) / AGENTS / "helper.md", _file(VALID))
     write(workspace.home / AGENTS / "helper.md", _file(VALID))
     repo = workspace.rig()
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     fired = [(finding.layer, finding.path, finding.message, finding.line) for finding in findings if finding.rule_id in REF_RULES]
     assert fired == [(Layer.USER, workspace.home / AGENTS / "helper.md", _collision("helper", ".claude/agents/helper.md"), 2)]
 
@@ -289,7 +289,7 @@ def test_later_path_loses_within_one_layer(workspace: Workspace) -> None:
     repo = _repo(workspace)
     write(repo / AGENTS / "a.md", _file(VALID))
     write(repo / AGENTS / "sub" / "b.md", _file(VALID))
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     fired = [(finding.path, finding.message) for finding in findings if finding.rule_id in REF_RULES]
     assert fired == [(repo / AGENTS / "sub" / "b.md", _collision("helper", ".claude/agents/a.md"))]
 
@@ -357,7 +357,7 @@ def _plugin(workspace: Workspace, files: dict[str, str], ids: tuple[str, ...] = 
 
 def _plugin_found(workspace: Workspace) -> list[tuple[Layer | None, str, str]]:
     repo = _repo(workspace)
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     return [(finding.layer, finding.rule_id, finding.message) for finding in findings if finding.rule_id in REF_RULES]
 
 
@@ -379,7 +379,7 @@ def test_other_agents_name_a_plugin_skill_with_its_prefix(workspace: Workspace) 
 def test_two_installs_of_one_plugin_collide(workspace: Workspace) -> None:
     _plugin(workspace, {"agents/lint.md": _file("name: lint\ndescription: Lint.\n")}, ("tools@a", "tools@b"))
     repo = _repo(workspace)
-    findings = engine.run(discover(repo, workspace.home), REGISTRY.values())
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
     fired = [(finding.path, finding.message) for finding in findings if finding.rule_id in REF_RULES]
     loser = workspace.home / "plugin-cache" / "tools-b" / "agents" / "lint.md"
     assert fired == [(loser, _collision("tools:lint", "~/plugin-cache/tools-a/agents/lint.md"))]

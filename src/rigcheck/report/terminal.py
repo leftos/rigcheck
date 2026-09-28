@@ -7,7 +7,7 @@ from typing import TextIO
 from rigcheck import __version__
 from rigcheck.engine import count_by_severity
 from rigcheck.model import Finding, Layer, Rig, Severity
-from rigcheck.report.budget import Budget, Listing
+from rigcheck.report.budget import Budget, Listing, window_label
 
 _COLORS = {Severity.ERROR: "\x1b[31m", Severity.WARN: "\x1b[33m", Severity.INFO: "\x1b[36m"}
 _RESET = "\x1b[0m"
@@ -41,15 +41,6 @@ def _finding_lines(rig: Rig, finding: Finding, color: bool) -> list[str]:
     if color:
         severity = f"{_COLORS[finding.severity]}{severity}{_RESET}"
     return [f"  {location}  {severity}  {finding.rule_id}  {finding.message}", f"      fix: {finding.fix}"]
-
-
-def window_label(window: int) -> str:
-    """Show a context window as ``200k`` or ``1m`` when round, else with thousands separators."""
-    if window % 1_000_000 == 0:
-        return f"{window // 1_000_000}m"
-    if window % 1_000 == 0:
-        return f"{window // 1_000}k"
-    return f"{window:,}"
 
 
 def _listing_line(label: str, listing: Listing, color: bool) -> str:

@@ -8,6 +8,9 @@ from enum import Enum
 from functools import cached_property
 from pathlib import Path
 
+DEFAULT_WINDOW = 200_000
+"""The context window, in tokens, assumed when none is given."""
+
 
 class _Ranked(Enum):
     """An enum whose declaration order is its rank order."""
@@ -147,13 +150,18 @@ def unc_link_target(path: Path) -> str | None:
 
 @dataclass(frozen=True)
 class Rig:
-    """The discovered setup: every artifact plus the problems met while finding them."""
+    """The discovered setup: every artifact plus the problems met while finding them.
+
+    Attributes:
+        window: The model's context window, in tokens.
+    """
 
     target: Path
     repo_root: Path
     home: Path
     artifacts: tuple[Artifact, ...]
     problems: tuple[str, ...]
+    window: int
     _texts: dict[Path, str] = field(default_factory=dict, init=False, repr=False, compare=False)
 
     def text(self, path: Path) -> str:
