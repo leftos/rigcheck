@@ -1,4 +1,4 @@
-"""Shared helpers for the component rules: artifact selection, recognized key tables and the frontmatter warn."""
+"""Shared helpers for the component rules: artifact selection, key tables, the frontmatter warn, misplaced_fence and case_match."""
 
 import re
 from collections.abc import Iterator
@@ -126,6 +126,44 @@ def unknown_key_message(key: str, known: frozenset[str]) -> str:
     if len(matches) == 1:
         return f'unknown key "{key}" (did you mean "{matches[0]}"?); Claude Code ignores it'
     return f'unknown key "{key}"; Claude Code ignores it'
+
+
+def case_match(value: object, allowed: tuple[str, ...]) -> str | None:
+    """Return the allowed value that ``value`` spells in another case.
+
+    Args:
+        value: A value from the frontmatter.
+        allowed: The values the key accepts.
+
+    Returns:
+        The first allowed value equal to ``value`` ignoring case, or None when ``value`` is not a string or matches none.
+    """
+    if not isinstance(value, str):
+        return None
+    return next((candidate for candidate in allowed if candidate.casefold() == value.casefold()), None)
+
+
+def misplaced_fence(text: str) -> tuple[int, str] | None:
+    """Find an opening ``---`` that Claude Code does not read as frontmatter because it is not alone on line 1.
+
+    Args:
+        text: The whole file content.
+
+    Returns:
+        The fence's 1-based line and what is wrong with it; None when line 1 is exactly ``---``, the first
+        non-blank line is not a fence, or no closing ``---`` line follows it (a horizontal rule, not frontmatter).
+    """
+    lines = text.removeprefix(frontmatter.BOM).split("\n")
+    if lines[0].removesuffix("\r") == frontmatter.FENCE:
+        return None
+    first = next((index for index, line in enumerate(lines) if line.strip()), None)
+    if first is None or lines[first].strip() != frontmatter.FENCE:
+        return None
+    if not any(line.strip() == frontmatter.FENCE for line in lines[first + 1 :]):
+        return None
+    if first == 0:
+        return 1, f'the opening line is "{lines[0].removesuffix("\r")}", not exactly ---'
+    return first + 1, f"the frontmatter starts on line {first + 1}"
 
 
 def yaml_reason(strict_error: str) -> str:

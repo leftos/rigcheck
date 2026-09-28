@@ -5,18 +5,16 @@ from collections.abc import Iterator
 from typing import Any
 
 from rigcheck.model import Artifact, Finding, Kind, Layer, Rig, Severity
-from rigcheck.parse.frontmatter import FENCE, as_bool
+from rigcheck.parse.frontmatter import as_bool
 from rigcheck.report.budget import LISTING_DETAIL_CHARS
 from rigcheck.rules import emit, rule
-from rigcheck.rules.components import KEYS, components, load, unknown_key_message, yaml_line, yaml_reason
+from rigcheck.rules.components import KEYS, components, load, misplaced_fence, unknown_key_message, yaml_line, yaml_reason
 
 LISTED_KINDS = (Kind.SKILL, Kind.COMMAND)
 """The artifact kinds whose frontmatter follows the skill format."""
 
 _COMMAND_UNSUPPORTED = frozenset({"name", "paths"})
 """Skill keys a command file does not support; another rule reports them."""
-
-_BOM = "\ufeff"
 
 
 @rule(
@@ -29,20 +27,11 @@ _BOM = "\ufeff"
 def skill_frontmatter_misplaced(rig: Rig) -> Iterator[Finding]:
     """Frontmatter whose opening --- is not the file's first line."""
     for artifact in components(rig, LISTED_KINDS):
-        lines = rig.text(artifact.path).removeprefix(_BOM).split("\n")
-        if lines[0].removesuffix("\r") == FENCE:
-            continue
-        first = next((index for index, line in enumerate(lines) if line.strip()), None)
-        if first is not None and lines[first].strip() == FENCE:
-            yield emit("skill-frontmatter-misplaced", artifact, _misplaced_message(lines, first), first + 1)
-
-
-def _misplaced_message(lines: list[str], first: int) -> str:
-    """Name the problem: spaces around a fence on line 1, or the later line the fence sits on."""
-    consequence = "so Claude Code reads the whole file as content and no field is set"
-    if first == 0:
-        return f'the opening line is "{lines[0].removesuffix("\r")}", not exactly ---, {consequence}'
-    return f"the frontmatter starts on line {first + 1}, {consequence}"
+        misplaced = misplaced_fence(rig.text(artifact.path))
+        if misplaced is not None:
+            line, problem = misplaced
+            message = f"{problem}, so Claude Code reads the whole file as content and no field is set"
+            yield emit("skill-frontmatter-misplaced", artifact, message, line)
 
 
 @rule(

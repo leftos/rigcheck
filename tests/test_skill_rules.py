@@ -56,6 +56,10 @@ def test_misplaced_after_a_heading_is_not_frontmatter(workspace: Workspace) -> N
     assert _findings(workspace, "skill-frontmatter-misplaced", "# Title\n\n---\n") == []
 
 
+def test_misplaced_rule_without_a_closing_fence_is_a_horizontal_rule(workspace: Workspace) -> None:
+    assert _findings(workspace, "skill-frontmatter-misplaced", "\n---\n\n# Notes\n") == []
+
+
 def test_misplaced_on_line_one_passes(workspace: Workspace) -> None:
     assert _findings(workspace, "skill-frontmatter-misplaced", "---\nname: a\n---\n") == []
 
