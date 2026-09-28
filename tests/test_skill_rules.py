@@ -378,8 +378,21 @@ def test_skill_link_placeholder_to_a_missing_file_is_broken(workspace: Workspace
     assert found == [("skill-link-broken", "SKILL.md", f"the link {prefix}references/a.md points at no file", 6)]
 
 
-def test_skill_file_placeholder_code_span_is_referenced(workspace: Workspace) -> None:
-    assert _script(workspace, "Run `${CLAUDE_SKILL_DIR}/scripts/run.py`.\n") == []
+@pytest.mark.parametrize(
+    "prefix", ["${CLAUDE_SKILL_DIR}/", "<skill-dir>/", "<skill-directory>/", "<SKILL_DIR>/", "<skill-creator-path>/", "<skill_root>/"]
+)
+def test_skill_file_placeholder_code_span_is_referenced(workspace: Workspace, prefix: str) -> None:
+    assert _script(workspace, f"Run `{prefix}scripts/run.py`.\n") == []
+
+
+def test_skill_file_placeholder_in_a_fence_is_referenced(workspace: Workspace) -> None:
+    assert _script(workspace, '```powershell\n& "<skill-directory>/scripts/run.py" -Fast\n```\n') == []
+
+
+@pytest.mark.parametrize("prefix", ["<root>/", "<skill>/", "<repo-root>/"])
+def test_skill_file_other_angle_placeholder_is_unreferenced(workspace: Workspace, prefix: str) -> None:
+    found = _script(workspace, f"Run `{prefix}scripts/run.py`.\n")
+    assert [f[0:2] for f in found] == [("skill-file-unreferenced", "scripts/run.py")]
 
 
 def test_skill_link_in_a_linked_file_falls_back_to_the_skill_folder(workspace: Workspace) -> None:
