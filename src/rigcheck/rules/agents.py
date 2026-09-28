@@ -2,6 +2,7 @@
 
 import json
 import re
+import unicodedata
 from collections.abc import Callable, Iterator
 from datetime import date
 from typing import Any
@@ -19,6 +20,82 @@ from rigcheck.rules.components import (
     yaml_line,
     yaml_reason,
 )
+
+# Built-in names measured from Claude Code 2.1.283 on 2026-09-27 (docs/research/builtin-tables-probe.md).
+BUILTIN_TOOLS = (
+    "Agent",
+    "Artifact",
+    "ArtifactCheck",
+    "ArtifactComments",
+    "ArtifactData",
+    "AskUserQuestion",
+    "Bash",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "Edit",
+    "EndConversation",
+    "EnterPlanMode",
+    "EnterWorktree",
+    "ExitPlanMode",
+    "ExitWorktree",
+    "Glob",
+    "Grep",
+    "LSP",
+    "ListAgents",
+    "ListMcpResourcesTool",
+    "Monitor",
+    "NotebookEdit",
+    "PowerShell",
+    "PushNotification",
+    "REPL",
+    "Read",
+    "ReadMcpResourceDirTool",
+    "ReadMcpResourceTool",
+    "RemoteTrigger",
+    "ReportFindings",
+    "ScheduleWakeup",
+    "SendFeedback",
+    "SendMessage",
+    "SendUserFile",
+    "SendUserMessage",
+    "ShareOnboardingGuide",
+    "Skill",
+    "SubagentHandback",
+    "TaskCreate",
+    "TaskGet",
+    "TaskList",
+    "TaskOutput",
+    "TaskStop",
+    "TaskUpdate",
+    "TodoWrite",
+    "ToolSearch",
+    "WaitForMcpServers",
+    "WebFetch",
+    "WebSearch",
+    "Workflow",
+    "Write",
+)
+"""The tool names Claude Code builds in, core and deferred."""
+
+TOOL_ALIASES = {
+    "Brief": "SendUserMessage",
+    "KillBash": "TaskStop",
+    "KillShell": "TaskStop",
+    "ListMcpResources": "ListMcpResourcesTool",
+    "ListPeers": "ListAgents",
+    "ReadMcpResource": "ReadMcpResourceTool",
+    "ReadMcpResourceDir": "ReadMcpResourceDirTool",
+    "RunWorkflow": "Workflow",
+    "Task": "Agent",
+}
+"""Older tool names Claude Code still resolves, each to the built-in tool it now names (the probe's bin alias map)."""
+
+PERMISSION_ONLY_TOOLS = ("LS", "MultiEdit", "NotebookRead")
+"""Legacy names Claude Code accepts only in permission lists; no tool answers to them (the probe's legacy permission lists)."""
+
+BUILTIN_AGENTS = ("Explore", "Plan", "claude", "claude-code-guide", "fork", "general-purpose", "statusline-setup", "web-fetch")
+"""The subagent names Claude Code builds in."""
 
 MODEL_ALIASES = ("sonnet", "opus", "haiku", "fable", "inherit", "opusplan", "best", "default", "sonnet[1m]", "opus[1m]", "fable[1m]")
 """The model aliases Claude Code accepts in an agent's ``model`` (agent-values-probe.md); a full id starts with ``claude-``."""
@@ -44,17 +121,32 @@ Problem = tuple[str, str]
 """A value finding: its rule id and message."""
 
 
-def _show(value: Any) -> str:
+def show(value: Any) -> str:
+    """Return ``value`` as JSON, the way finding messages quote a frontmatter value.
+
+    Args:
+        value: A frontmatter value.
+
+    Returns:
+        Its JSON text, non-ASCII kept and unknown types shown through ``str``.
+    """
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
-def _as_text(value: Any) -> Any:
-    """Read a YAML 1.1 boolean, date or datetime as the string Claude Code's YAML 1.2 parser keeps; other values unchanged."""
+def as_text(value: Any) -> Any:
+    """Read a YAML 1.1 boolean, date or datetime as the string Claude Code's YAML 1.2 parser keeps.
+
+    Args:
+        value: A frontmatter value.
+
+    Returns:
+        The value as a string when it is a boolean or date; otherwise the value unchanged.
+    """
     return str(value) if isinstance(value, bool | date) else value
 
 
 def _name_problem(data: dict[Any, Any]) -> str | None:
-    name = _as_text(data.get("name"))
+    name = as_text(data.get("name"))
     if name is None:
         return "no name, so Claude Code treats the file as documentation and skips it"
     if not isinstance(name, str):
@@ -62,14 +154,14 @@ def _name_problem(data: dict[Any, Any]) -> str | None:
     if not name.strip():
         return f"name is empty, {_SKIPS}"
     if name.strip().startswith("-"):
-        return f'name {_show(name)} starts with "-", {_SKIPS}'
-    if ":" in name:
-        return f'name {_show(name)} holds ":", {_SKIPS}'
+        return f'name {show(name)} starts with "-", {_SKIPS}'
+    if ":" in unicodedata.normalize("NFKC", name):
+        return f'name {show(name)} holds ":", {_SKIPS}'
     return None
 
 
 def _description_problem(data: dict[Any, Any]) -> str | None:
-    description = _as_text(data.get("description"))
+    description = as_text(data.get("description"))
     if description is None:
         return f"no description, {_SKIPS}"
     if not isinstance(description, str):
@@ -98,8 +190,15 @@ def _skip_reason(rig: Rig, artifact: Artifact, parsed: Frontmatter) -> tuple[str
     return None
 
 
-def _loaded(rig: Rig) -> Iterator[tuple[Artifact, Frontmatter, dict[Any, Any]]]:
-    """Yield each agent Claude Code loads with its settings, with its frontmatter mapping."""
+def loaded_agents(rig: Rig) -> Iterator[tuple[Artifact, Frontmatter, dict[Any, Any]]]:
+    """Yield each agent Claude Code loads with its settings.
+
+    Args:
+        rig: The discovered setup.
+
+    Yields:
+        The agent file, its parsed frontmatter and the frontmatter mapping; skipped agents are left out.
+    """
     for artifact in components(rig, (Kind.AGENT,)):
         parsed = load(rig, artifact)
         if parsed.data is not None and _skip_reason(rig, artifact, parsed) is None:
@@ -147,7 +246,7 @@ def _unknown_keys(parsed: Frontmatter, data: dict[Any, Any]) -> Iterator[tuple[s
 )
 def agent_key_unknown(rig: Rig) -> Iterator[Finding]:
     """A subagent frontmatter key Claude Code does not recognize, so it is ignored."""
-    for artifact, parsed, data in _loaded(rig):
+    for artifact, parsed, data in loaded_agents(rig):
         for message, line in _unknown_keys(parsed, data):
             yield emit("agent-key-unknown", artifact, message, line)
 
@@ -157,10 +256,10 @@ def _check_model(key: str, value: Any) -> Problem | None:
         return None
     alias = case_match(value, MODEL_ALIASES)
     if alias is not None:
-        return _CASE, f'{key} {_show(value)}: use the documented spelling "{alias}"'
+        return _CASE, f'{key} {show(value)}: use the documented spelling "{alias}"'
     if isinstance(value, str) and value.lower().startswith("claude-"):
-        return _INVALID, f'{key} {_show(value)} is not a model id (did you mean "{value.lower()}"?), {_FAILS}'
-    return _INVALID, f"{key} {_show(value)} is not a model alias or a claude- model id, {_FAILS}"
+        return _INVALID, f'{key} {show(value)} is not a model id (did you mean "{value.lower()}"?), {_FAILS}'
+    return _INVALID, f"{key} {show(value)} is not a model alias or a claude- model id, {_FAILS}"
 
 
 def _check_effort(key: str, value: Any) -> Problem | None:
@@ -170,8 +269,8 @@ def _check_effort(key: str, value: Any) -> Problem | None:
         return None
     level = case_match(value, EFFORTS)
     if level is not None:
-        return _CASE, f'{key} {_show(value)}: use the documented spelling "{level}"'
-    return _INVALID, f"{key} {_show(value)} is not one of {', '.join(EFFORTS)} or an integer; {_IGNORED}"
+        return _CASE, f'{key} {show(value)}: use the documented spelling "{level}"'
+    return _INVALID, f"{key} {show(value)} is not one of {', '.join(EFFORTS)} or an integer; {_IGNORED}"
 
 
 def _enum(allowed: tuple[str, ...]) -> Callable[[str, Any], Problem | None]:
@@ -182,8 +281,8 @@ def _enum(allowed: tuple[str, ...]) -> Callable[[str, Any], Problem | None]:
             return None
         match = case_match(value, allowed)
         if match is not None:
-            return _INVALID, f'{key} {_show(value)} is not valid (did you mean "{match}"?); {_IGNORED}'
-        return _INVALID, f"{key} {_show(value)} is not one of {', '.join(allowed)}; {_IGNORED}"
+            return _INVALID, f'{key} {show(value)} is not valid (did you mean "{match}"?); {_IGNORED}'
+        return _INVALID, f"{key} {show(value)} is not one of {', '.join(allowed)}; {_IGNORED}"
 
     return check
 
@@ -191,31 +290,31 @@ def _enum(allowed: tuple[str, ...]) -> Callable[[str, Any], Problem | None]:
 def _check_max_turns(key: str, value: Any) -> Problem | None:
     if isinstance(value, int) and not isinstance(value, bool) and value >= 1:
         return None
-    return _INVALID, f"{key} {_show(value)} is not a positive integer; {_IGNORED}"
+    return _INVALID, f"{key} {show(value)} is not a positive integer; {_IGNORED}"
 
 
 def _check_bool(key: str, value: Any) -> Problem | None:
     if as_bool(value) is not None:
         return None
-    return _INVALID, f"{key} {_show(value)} is not true or false; {_IGNORED}"
+    return _INVALID, f"{key} {show(value)} is not true or false; {_IGNORED}"
 
 
 def _check_names(key: str, value: Any) -> Problem | None:
     if isinstance(value, str):
         return None
     if not isinstance(value, list):
-        return _INVALID, f"{key} {_show(value)} is not a string or a list of strings"
+        return _INVALID, f"{key} {show(value)} is not a string or a list of strings"
     bad = [item for item in value if not isinstance(item, str)]
-    return (_INVALID, f"{key} holds {_show(bad[0])}, which is not a string") if bad else None
+    return (_INVALID, f"{key} holds {show(bad[0])}, which is not a string") if bad else None
 
 
 def _check_string(key: str, value: Any) -> Problem | None:
-    return None if isinstance(value, str) else (_INVALID, f"{key} {_show(value)} is not a string")
+    return None if isinstance(value, str) else (_INVALID, f"{key} {show(value)} is not a string")
 
 
 def _check_experimental(key: str, value: Any) -> Problem | None:
     if not isinstance(value, dict):
-        return _INVALID, f"{key} {_show(value)} is not a mapping"
+        return _INVALID, f"{key} {show(value)} is not a mapping"
     ttl = value.get("cacheTtl")
     return None if ttl is None else _enum(CACHE_TTLS)(f"{key}.cacheTtl", ttl)
 
@@ -251,7 +350,7 @@ def _value_problems(artifact: Artifact, parsed: Frontmatter, data: dict[Any, Any
 
 
 def _value_findings(rig: Rig, rule_id: str) -> Iterator[Finding]:
-    for artifact, parsed, data in _loaded(rig):
+    for artifact, parsed, data in loaded_agents(rig):
         for found_id, message, line in _value_problems(artifact, parsed, data):
             if found_id == rule_id:
                 yield emit(rule_id, artifact, message, line)
