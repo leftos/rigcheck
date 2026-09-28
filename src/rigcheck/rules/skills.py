@@ -270,8 +270,16 @@ _LINKED = ("link", "image")
 _PLACEHOLDER = re.compile(r"(?:\$(?:\{|%7[Bb])CLAUDE_SKILL_DIR(?:\}|%7[Dd])|\$CLAUDE_SKILL_DIR|(?:\{|%7[Bb])baseDir(?:\}|%7[Dd]))(?:/|\\|%5[Cc])")
 """A skill-folder placeholder at the start of a path, as written or URL-encoded; the rest resolves against the skill folder."""
 
-_CODE_PREFIX = re.compile(r"(?:\$\{CLAUDE_SKILL_DIR\}|\$CLAUDE_SKILL_DIR|\{baseDir\})/|(?<![\w.\-/])\./")
-"""Prefixes that may stand before a skill-relative path in code text; replaced by a space before matching."""
+_CODE_PREFIX = re.compile(
+    r"(?:\$\{CLAUDE_SKILL_DIR\}|\$CLAUDE_SKILL_DIR|\{baseDir\})/"
+    r"|(?i:<[A-Za-z0-9_-]*skill[A-Za-z0-9_-]*(?:dir|directory|path|folder|root)>)/"
+    r"|(?<![\w.\-/])\./"
+)
+"""Prefixes that may stand before a skill-relative path in code text; replaced by a space before matching.
+
+That is a skill-folder placeholder (``${CLAUDE_SKILL_DIR}/``, ``$CLAUDE_SKILL_DIR/`` or ``{baseDir}/``), an
+angle-bracket placeholder naming the skill folder such as ``<skill-dir>/`` or ``<SKILL_ROOT>/``, or a leading ``./``.
+"""
 
 
 def _written(reference: Reference) -> str:

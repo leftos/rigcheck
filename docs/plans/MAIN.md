@@ -37,7 +37,7 @@ Rulings (user, 2026-09-27): reserved names match `claude`/`anthropic` as a whole
 ### Wave 1 — M3 tail (budget report and skill rules; the two items share no file, so they run side by side; gate: `code-review` plus smoke)
 
 - [ ] M3n Budget findings: `skill-listing-over-budget`, `agent-descriptions-over-budget` (SK27, AG6), with the `--window` value carried on the Rig
-- [ ] `skill-file-unreferenced` reads `<skill-dir>/scripts/x.ps1` (a pseudo-placeholder, seen in the dotnet-test plugin's coverage-analysis skill) as not naming the file; recognise `<skill-dir>/` beside `{baseDir}/` in `rules/skills.py`
+- [x] `skill-file-unreferenced` reads `<skill-dir>/scripts/x.ps1` (a pseudo-placeholder, seen in the dotnet-test plugin's coverage-analysis skill) as not naming the file; recognise `<skill-dir>/` beside `{baseDir}/` in `rules/skills.py`. Settled by the orchestrator, validated by smoke (plugin hits 7 → 5, both dropped hits the coverage-analysis scripts): in code text only, an angle-bracket name containing `skill` and ending in `dir`, `directory`, `path`, `folder` or `root`, any case; `<root>/`, `<skill>/` and `<repo-root>/` do not count
 
 ### Wave 2 — M4 config rules (new `rules/` modules for hooks, settings, MCP, secrets, duplication; gate: `code-review` plus smoke)
 
