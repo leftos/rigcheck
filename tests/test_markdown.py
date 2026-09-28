@@ -246,9 +246,12 @@ def test_find_references_fence_lines() -> None:
     ]
 
 
-def test_find_references_skips_autolinks_images_and_comments() -> None:
+def test_find_references_skips_autolinks_and_comments_and_reports_images() -> None:
     text = "<https://example.com/a>\n\n![pic](img/p.png)\n\n<!-- `docs/c.md` [x](docs/d.md) -->\n\n[ok](docs/e.md)\n"
-    assert find_references(text) == [Reference(line=7, raw="docs/e.md", source="link", lang="")]
+    assert find_references(text) == [
+        Reference(line=3, raw="img/p.png", source="image", lang=""),
+        Reference(line=7, raw="docs/e.md", source="link", lang=""),
+    ]
 
 
 def test_find_references_skips_code_spans_in_link_text() -> None:

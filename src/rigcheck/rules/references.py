@@ -127,11 +127,13 @@ def path_candidate(reference: Reference) -> str | None:
     return None if _first_segment(token) in SKIP_DIRS else token
 
 
-def _inside(path: Path, root: Path) -> bool:
+def inside(path: Path, root: Path) -> bool:
+    """Return True when ``path`` is ``root`` or lies under it, compared by normalized, case-folded path."""
     return Path(path_key(path)).is_relative_to(Path(path_key(root)))
 
 
-def _resolved(base: Path, token: str) -> Path:
+def resolved(base: Path, token: str) -> Path:
+    """Return ``base / token`` normalized, with ``..`` folded but no symlink resolved."""
     return Path(os.path.normpath(base / token))
 
 
@@ -146,10 +148,11 @@ def path_bases(token: str, directory: Path, root: Path) -> list[Path]:
     Returns:
         The normalised candidates inside ``root``; empty when every reading leaves the repository.
     """
-    return [path for path in (_resolved(directory, token), _resolved(root, token)) if _inside(path, root)]
+    return [path for path in (resolved(directory, token), resolved(root, token)) if inside(path, root)]
 
 
-def _exists(path: Path) -> bool:
+def exists(path: Path) -> bool:
+    """Return True when ``path`` exists; False when it does not or cannot be checked."""
     try:
         return path.exists()
     except (OSError, ValueError):
@@ -158,19 +161,19 @@ def _exists(path: Path) -> bool:
 
 def _stale(paths: list[Path]) -> bool:
     """True when no path exists but at least one path's parent folder does, so only the leaf is gone."""
-    return not any(_exists(path) for path in paths) and any(_exists(path.parent) for path in paths)
+    return not any(exists(path) for path in paths) and any(exists(path.parent) for path in paths)
 
 
 def _missing_path_message(rig: Rig, artifact: Artifact, reference: Reference, token: str) -> str | None:
     """Return the message for a path that names no file, or None when it exists or is not checkable."""
     if token.startswith("~/"):
-        return f"{reference.raw} does not exist in the home folder" if _stale([_resolved(rig.home, token[2:])]) else None
+        return f"{reference.raw} does not exist in the home folder" if _stale([resolved(rig.home, token[2:])]) else None
     if artifact.layer is not Layer.REPO:
         return None
     bases = path_bases(token, artifact.path.parent, rig.repo_root)
     if bases:
         return f"{reference.raw} does not exist (looked beside {artifact.path.name} and at the repo root)" if _stale(bases) else None
-    if token.startswith("../") and _stale([_resolved(artifact.path.parent, token)]):
+    if token.startswith("../") and _stale([resolved(artifact.path.parent, token)]):
         return f"{reference.raw} does not exist (looked beside {artifact.path.name}, outside the repo)"
     return None
 
@@ -348,7 +351,7 @@ def _names(rig: Rig, family: str, manifest: Path) -> set[str] | None:
 
 
 def _nearest(directory: Path, root: Path, names: tuple[str, ...]) -> Path | None:
-    if not _inside(directory, root):
+    if not inside(directory, root):
         return None
     root_key = path_key(root)
     for folder in (directory, *directory.parents):
@@ -403,7 +406,7 @@ def reference_script_missing(rig: Rig) -> Iterator[Finding]:
         if artifact.layer is not Layer.REPO:
             continue
         for reference in _references(rig, artifact):
-            if reference.source == "link" or (reference.source == "fence" and reference.lang not in _SHELL_LANGS):
+            if reference.source in ("link", "image") or (reference.source == "fence" and reference.lang not in _SHELL_LANGS):
                 continue
             for message in _missing_scripts(manifests, artifact, reference):
                 yield emit("reference-script-missing", artifact, message, reference.line)

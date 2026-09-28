@@ -48,6 +48,8 @@ def strip_html_comments(text: str) -> str:
         The content with newlines normalized to ``\n`` and block-level comments removed.
     """
     text = _normalize(text)
+    if "<!--" not in text:
+        return text
     lines = text.split("\n")
     for token in _PARSER.parse(text):
         if token.type != "html_block" or token.map is None or not token.content.lstrip().startswith("<!--"):
@@ -110,8 +112,8 @@ class Reference:
 
     Attributes:
         line: 1-based line the reference starts on.
-        raw: The code span's content, the link's href, or one code block line without its newline.
-        source: ``span`` for a code span, ``link`` for a link, ``fence`` for a code block line.
+        raw: The code span's content, the link's href or image's src, or one code block line without its newline.
+        source: ``span`` for a code span, ``link`` for a link, ``image`` for an image, ``fence`` for a code block line.
         lang: A fenced block's language, the first word of its info string lower-cased; empty otherwise.
     """
 
@@ -148,6 +150,8 @@ class _InlineScan:
     def span(self, child: Token) -> None:
         if not self.in_link:
             self.found.append(Reference(line=self.line, raw=child.content, source="span", lang=""))
+        if "\n" not in self.source:
+            return
         newlines, self.cursor = _span_newlines(self.source, self.cursor, child)
         self.line += newlines
 
@@ -167,6 +171,8 @@ class _InlineScan:
             self.link(child)
         elif child.type == "link_close":
             self.in_link = False
+        elif child.type == "image":
+            self.found.append(Reference(line=self.line, raw=str(child.attrs.get("src", "")), source="image", lang=""))
 
 
 def _inline_references(token: Token) -> list[Reference]:
@@ -191,14 +197,14 @@ def _block_references(token: Token) -> list[Reference]:
 def find_references(text: str) -> list[Reference]:
     """Find the code spans, links and code block lines of a Markdown file.
 
-    Block-level HTML comments are removed first (see :func:`strip_html_comments`); autolinks,
-    images, and code spans inside a link's text are not reported.
+    Block-level HTML comments are removed first (see :func:`strip_html_comments`); autolinks
+    and code spans inside a link's text are not reported.
 
     Args:
         text: The file content.
 
     Returns:
-        The references in document order, one per code span, link, or code block line.
+        The references in document order, one per code span, link, image, or code block line.
     """
     found: list[Reference] = []
     for token in _PARSER.parse(strip_html_comments(text)):
