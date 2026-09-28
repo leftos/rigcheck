@@ -61,4 +61,5 @@ import rigcheck.rules.memory  # noqa: E402 - imported for its registrations
 import rigcheck.rules.output_styles  # noqa: E402 - imported for its registrations
 import rigcheck.rules.references  # noqa: E402 - imported for its registrations
 import rigcheck.rules.rules_dir  # noqa: E402 - imported for its registrations
+import rigcheck.rules.skill_body  # noqa: E402 - imported for its registrations
 import rigcheck.rules.skills  # noqa: E402, F401 - imported for its registrations

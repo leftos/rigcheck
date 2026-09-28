@@ -227,15 +227,22 @@ _MANIFESTS = {
 _KINDS = {"npm": "script", "just": "recipe", "make": "target"}
 
 
-def _segments(raw: str) -> list[str]:
-    """Split shell text on ``&&``, ``||``, ``;`` and ``|`` outside single and double quotes."""
-    segments = [""]
+def segments(raw: str) -> list[str]:
+    """Split shell text on ``&&``, ``||``, ``;`` and ``|`` outside single and double quotes.
+
+    Args:
+        raw: One line of shell text.
+
+    Returns:
+        The text between separators, in order; empty strings where separators meet.
+    """
+    found = [""]
     for part in _SHELL_PARTS.findall(raw):
         if part in _SEPARATORS:
-            segments.append("")
+            found.append("")
         else:
-            segments[-1] += part
-    return segments
+            found[-1] += part
+    return found
 
 
 def _redirected(tool: str, words: list[str]) -> bool:
@@ -287,7 +294,7 @@ def invocations(raw: str) -> list[tuple[str, str]]:
         ``(tool, name)`` pairs in order, with tool such as ``npm run``, ``just`` or ``make``.
     """
     found: list[tuple[str, str]] = []
-    for segment in _segments(raw):
+    for segment in segments(raw):
         if segment.split()[:1] == ["cd"]:
             break
         invocation = _invocation(segment)

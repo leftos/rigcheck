@@ -2,7 +2,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from rigcheck.parse import frontmatter
-from rigcheck.parse.markdown import find_imports, find_references, is_candidate, strip_html_comments
+from rigcheck.parse.markdown import find_imports, find_injections, find_references, is_candidate, prose_segments, strip_html_comments
 
 PATH_CHARS = st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789-", min_size=1, max_size=8)
 CANDIDATES = st.builds(lambda stem, ext: f"{stem}.{ext}", PATH_CHARS, st.sampled_from(["md", "txt", "json"]))
@@ -103,3 +103,17 @@ def test_every_returned_raw_satisfies_the_candidate_rule(text: str) -> None:
         assert is_candidate(item.raw)
         assert item.raw[-1] not in ".,;:)!?\"'"
         assert item.line >= 1
+
+
+@settings(deadline=None)
+@given(st.text(), st.integers(min_value=1, max_value=6))
+def test_find_injections_never_raises(text: str, start_line: int) -> None:
+    for injection in find_injections(text, start_line):
+        assert injection.line >= start_line
+
+
+@settings(deadline=None)
+@given(st.text(), st.integers(min_value=1, max_value=6))
+def test_prose_segments_never_raises(text: str, start_line: int) -> None:
+    for line, _segment in prose_segments(text, start_line):
+        assert line >= start_line

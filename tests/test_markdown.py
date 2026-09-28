@@ -1,7 +1,7 @@
 import pytest
 
 from rigcheck.parse import frontmatter
-from rigcheck.parse.markdown import Reference, find_imports, find_references, strip_html_comments
+from rigcheck.parse.markdown import Injection, Reference, find_imports, find_injections, find_references, prose_segments, strip_html_comments
 from rigcheck.parse.tokens import estimate
 
 
@@ -330,3 +330,98 @@ def test_token_estimate_rounds_up() -> None:
     assert estimate("abcd", 2.5) == 2
     assert estimate("a" * 25, 2.5) == 10
     assert estimate("a" * 31, 3.0) == 11
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("- PR: !`gh pr diff`", [("gh pr diff", False)]),
+        ("!`ls`", [("ls", False)]),
+        ("first\n!`ls`", [("ls", False)]),
+        ("first  \n!`ls`", [("ls", False)]),
+        ("a\t!`ls`", [("ls", False)]),
+        ("KEY=!`date`", [("date", True)]),
+        ("(!`git status`)", [("git status", True)]),
+        ("Output:!`ls`", [("ls", True)]),
+        ("**!`cmd`**", [("cmd", True)]),
+        ("`error!`", []),
+        ("`!`", []),
+        ("![img](x)", []),
+        ("a != b", []),
+        ("`a`!`b`", [("b", True)]),
+        ("`a` !`b`", [("b", False)]),
+        ("<b>!`b`", [("b", True)]),
+        ("[run !`ls`](x)", []),
+        ("```\n!`ls`\n```", []),
+        ("    !`ls`", []),
+        ("```bash\necho hi\n```", []),
+        ("\\!`ls`", []),
+        ("x \\!`ls`", []),
+        ("&#33;`ls`", []),
+        ("a \\\\!`ls`", [("ls", True)]),
+        ("[a][r]!`ls`\n\n[r]: http://x", [("ls", True)]),
+        ("~~~!\n./x\n~~~", []),
+        ("[`x`](u) !`ls`", [("ls", False)]),
+    ],
+)
+def test_find_injections_inline_examples(text: str, expected: list[tuple[str, bool]]) -> None:
+    assert [(item.command, item.literal) for item in find_injections(text, 1)] == expected
+
+
+def test_find_injections_reports_lines_and_form() -> None:
+    text = "# T\n\nintro\nnext !`a`\n\n```!\ngit status\ngit diff\n```\n"
+    assert find_injections(text, 1) == [
+        Injection(line=4, command="a", form="inline", literal=False, after=" "),
+        Injection(line=7, command="git status\ngit diff\n", form="fence", literal=False, after=""),
+    ]
+
+
+def test_find_injections_skips_tokens_before_the_start_line() -> None:
+    text = "---\nname: !`x`\n---\n\n!`ls`\n"
+    assert [(item.line, item.command) for item in find_injections(text, 4)] == [(5, "ls")]
+    assert [item.command for item in find_injections(text, 1)] == ["x", "ls"]
+
+
+def test_find_injections_counts_lines_across_a_multiline_span() -> None:
+    text = "a `b\nc` d\n!`ls`\n"
+    assert [(item.line, item.command) for item in find_injections(text, 1)] == [(3, "ls")]
+
+
+def test_find_injections_places_spans_after_inline_html() -> None:
+    text = '<b title="`a b`">x</b> `a\nb`\nKEY=!`z`\n'
+    assert [(item.line, item.command, item.after) for item in find_injections(text, 1)] == [(3, "z", "=")]
+
+
+def test_find_injections_counts_lines_in_a_link_title() -> None:
+    text = '[a](u "t\nu") x\nKEY=!`z`\n'
+    assert [(item.line, item.command) for item in find_injections(text, 1)] == [(3, "z")]
+
+
+def test_find_references_places_spans_after_inline_html() -> None:
+    text = '<b title="`a b`">x</b> `a\nb`\n`c`\n'
+    assert [(item.line, item.raw) for item in find_references(text) if item.source == "span"] == [(1, "a b"), (3, "c")]
+
+
+@pytest.mark.parametrize(
+    "text",
+    ['<b title="`$1`">x</b> `$1`', "[a](<`$1`>) `$1`", "[a](u '`$1`') `$1`", "<http://x/`$1`> `$1`", "![`$1`](u)"],
+)
+def test_prose_segments_blank_what_holds_no_prose(text: str) -> None:
+    assert "$1" not in "".join(segment for _line, segment in prose_segments(text, 1))
+
+
+def test_prose_segments_keep_image_alt_prose() -> None:
+    assert prose_segments("![costs $1 `x`](u)", 1) == [(1, "![costs $1    " + " " * 4)]
+
+
+def test_prose_segments_blank_code_spans_and_skip_blocks() -> None:
+    text = "costs $1 and `$2` here\nnext \\$3\n\n```\n$4\n```\n\n    $5\n\n<div>\n$6\n</div>\n"
+    assert prose_segments(text, 1) == [(1, "costs $1 and      here"), (2, "next \\$3")]
+
+
+def test_prose_segments_keep_offsets_across_a_multiline_span() -> None:
+    assert prose_segments("a `b\nc` $1\n", 1) == [(1, "a   "), (2, "   $1")]
+
+
+def test_prose_segments_skip_tokens_before_the_start_line() -> None:
+    assert prose_segments("---\nprice: $1\n---\nBody $2\n", 4) == [(4, "Body $2")]
