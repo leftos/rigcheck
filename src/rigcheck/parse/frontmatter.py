@@ -10,7 +10,7 @@ FENCE = "---"
 
 _BLOCK_MARKER = re.compile(r"[|>](?:[+-]?[1-9]?|[1-9][+-])")
 _QUOTES = ("'", '"')
-_BOM = "\ufeff"
+BOM = "\ufeff"
 
 _RETRY_KEY_LINE = re.compile(r"([a-zA-Z_-]+):\s+([^\r\n\u2028\u2029]+)")
 """A line Claude Code's retry may re-quote: its value is JavaScript's ``.+``, so a line ending in CR never matches."""
@@ -55,7 +55,7 @@ def parse(text: str) -> Frontmatter:
         The frontmatter. An unclosed block or a non-mapping sets both errors; YAML that only Claude Code's retry
         reads sets ``strict_error`` alone.
     """
-    raw = text.removeprefix(_BOM).split("\n")
+    raw = text.removeprefix(BOM).split("\n")
     lines = [line.removesuffix("\r") for line in raw]
     if lines[0] != FENCE:
         return Frontmatter(present=False, data=None, strict_error=None, load_error=None, key_lines={}, body_line=1)
@@ -145,7 +145,7 @@ def as_bool(value: object) -> bool | None:
 
 
 def _lines(text: str) -> list[str]:
-    return [line.removesuffix("\r") for line in text.removeprefix(_BOM).split("\n")]
+    return [line.removesuffix("\r") for line in text.removeprefix(BOM).split("\n")]
 
 
 def _join(parts: list[str]) -> str:
