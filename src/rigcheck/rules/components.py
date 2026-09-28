@@ -3,7 +3,7 @@
 import re
 from collections.abc import Iterator
 
-from rigcheck.model import Artifact, Finding, Kind, Rig, Severity
+from rigcheck.model import Artifact, Finding, Kind, Layer, Rig, Severity
 from rigcheck.parse import frontmatter
 from rigcheck.rules import emit, rule
 
@@ -93,6 +93,55 @@ def components(rig: Rig, kinds: tuple[Kind, ...]) -> list[Artifact]:
         The matching artifacts, in the order discovery recorded them.
     """
     return [artifact for artifact in rig.artifacts if artifact.kind in kinds]
+
+
+def plugin_name(artifact: Artifact) -> str | None:
+    """Return the name of the plugin ``artifact`` comes from, without its ``@marketplace``.
+
+    Args:
+        artifact: A discovered file.
+
+    Returns:
+        The plugin name, or None when the file is not from the plugin layer.
+    """
+    if artifact.layer is not Layer.PLUGIN or artifact.plugin is None:
+        return None
+    return artifact.plugin.split("@")[0]
+
+
+_QUOTES = ("'", '"')
+
+_TOOL_ENTRY = re.compile(r"(?:[^,\s()]|\([^)]*\))+")
+"""One entry of an allowed-tools string: commas and whitespace separate entries only outside parentheses."""
+
+
+def _unquote(entry: str) -> str:
+    """Strip one pair of matching quotes around ``entry``, as a flow list written inside a string leaves them."""
+    if len(entry) >= 2 and entry[0] in _QUOTES and entry[-1] == entry[0]:
+        return entry[1:-1]
+    return entry
+
+
+def tool_entries(value: object) -> list[str]:
+    """Return the entries of a skill's allowed-tools value.
+
+    Args:
+        value: The frontmatter value.
+
+    Returns:
+        A list's string items, or a string split into entries (a ``[...]`` flow list loaded as a string is unwrapped
+        and unquoted); empty for any other value.
+    """
+    if isinstance(value, list):
+        items = [item for item in value if isinstance(item, str)]
+    elif isinstance(value, str):
+        text = value.strip()
+        if text.startswith("[") and text.endswith("]"):
+            text = text[1:-1]
+        items = [_unquote(item.strip()) for item in _TOOL_ENTRY.findall(text)]
+    else:
+        items = []
+    return [item.strip() for item in items if item.strip()]
 
 
 def load(rig: Rig, artifact: Artifact) -> frontmatter.Frontmatter:

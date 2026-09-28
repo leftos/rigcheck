@@ -52,6 +52,7 @@ def emit(rule_id: str, artifact: Artifact, message: str, line: int | None) -> Fi
 
 
 # Area modules register their rules on import; they need `rule` and `emit` defined above.
+import rigcheck.rules.agent_refs  # noqa: E402 - imported for its registrations
 import rigcheck.rules.agents  # noqa: E402 - imported for its registrations
 import rigcheck.rules.commands  # noqa: E402 - imported for its registrations
 import rigcheck.rules.components  # noqa: E402 - imported for its registrations

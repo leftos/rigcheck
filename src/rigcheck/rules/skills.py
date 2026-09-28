@@ -16,7 +16,8 @@ from rigcheck.parse.frontmatter import as_bool
 from rigcheck.parse.markdown import Reference, find_references
 from rigcheck.report.budget import LISTING_DETAIL_CHARS
 from rigcheck.rules import emit, rule
-from rigcheck.rules.components import KEYS, components, load, misplaced_fence, unknown_key_message, yaml_line, yaml_reason
+from rigcheck.rules.components import KEYS, components, load, misplaced_fence, plugin_name, unknown_key_message, yaml_line, yaml_reason
+from rigcheck.rules.components import tool_entries as _tool_entries
 from rigcheck.rules.references import exists, inside, reference_path, resolved
 
 LISTED_KINDS = (Kind.SKILL, Kind.COMMAND)
@@ -147,8 +148,9 @@ def skill_unreachable(rig: Rig) -> Iterator[Finding]:
 def _accepted_names(artifact: Artifact, folder: str) -> set[str]:
     """Return the names that match the folder: the folder itself, and ``<plugin>:<folder>`` for a plugin skill."""
     names = {folder}
-    if artifact.layer is Layer.PLUGIN and artifact.plugin is not None:
-        names.add(f"{artifact.plugin.split('@')[0]}:{folder}")
+    plugin = plugin_name(artifact)
+    if plugin is not None:
+        names.add(f"{plugin}:{folder}")
     return names
 
 
@@ -231,32 +233,6 @@ def skill_fork_option_ignored(rig: Rig) -> Iterator[Finding]:
 
 _BROAD_TOOL = re.compile(r"^(Bash|Write|Edit)(\(\s*(\*|:\*|\*\*|/\*\*|\./\*\*)?\s*\))?$")
 """An allowed-tools entry naming Bash, Write or Edit with no specifier, or with an empty, wildcard or whole-tree one."""
-
-_QUOTES = ("'", '"')
-
-_TOOL_ENTRY = re.compile(r"(?:[^,\s()]|\([^)]*\))+")
-"""One entry of an allowed-tools string: commas and whitespace separate entries only outside parentheses."""
-
-
-def _unquote(entry: str) -> str:
-    """Strip one pair of matching quotes around ``entry``, as a flow list written inside a string leaves them."""
-    if len(entry) >= 2 and entry[0] in _QUOTES and entry[-1] == entry[0]:
-        return entry[1:-1]
-    return entry
-
-
-def _tool_entries(value: object) -> list[str]:
-    """Return the entries of an allowed-tools value: a list's string items, or a string split into entries."""
-    if isinstance(value, list):
-        items = [item for item in value if isinstance(item, str)]
-    elif isinstance(value, str):
-        text = value.strip()
-        if text.startswith("[") and text.endswith("]"):
-            text = text[1:-1]
-        items = [_unquote(item.strip()) for item in _TOOL_ENTRY.findall(text)]
-    else:
-        items = []
-    return [item.strip() for item in items if item.strip()]
 
 
 @rule(
