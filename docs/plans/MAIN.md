@@ -41,7 +41,20 @@ Rulings (user, 2026-09-27): reserved names match `claude`/`anthropic` as a whole
 
 ### Wave 2 — M4 config rules (new `rules/` modules for hooks, settings, MCP, secrets, duplication; gate: `code-review` plus smoke)
 
-- [ ] M4 Config rules: hooks, settings (vendored schema), MCP, secrets, duplication. A design item: split into lettered sub-items by rule module before dispatch
+M4 Config rules: hooks, settings (vendored schema), MCP, secrets, duplication, split by module (all read [v1.md](v1.md#rule-catalog-v1-ids-from-docsresearch) and the ids' entries in [official.md](../research/official.md)). Discovery already finds settings, repo and plugin `.mcp.json`, plugin `hooks/hooks.json` and `plugin.json` (`Kind.SETTINGS`/`HOOKS_CONFIG`/`MCP_CONFIG`/`PLUGIN_MANIFEST`), but no rule reads them; `jsonschema` is pinned and unused. M4a and M4b wait on M3n (both touch `rules/__init__.py` or the `Rig`); after them, two at a time from {M4c, M4d}, {M4e → M4g, M4f}, M4h, M4j; M4i last.
+
+Rulings (user, 2026-09-27): MC7 (server instructions over 2,048 characters) needs the server's own output, so it leaves v1 for the backlog; `duplicate-line` compares the every-turn files plus any AGENTS.md peer, loaded or shadowed; hook and MCP rules also read `hooks` and `mcpServers` inline in a plugin's `plugin.json`, and managed/policy settings are out of scope; `mcp-secret-literal` fires on git-tracked repo `.mcp.json` and plugin `.mcp.json` only, never on `~/.claude.json`. Technical choices in each sub-item (schema pin, grammar boundaries, duplicate measure, line lookup, split severities) are settled by the orchestrator against the smoke corpus when the sub-item is briefed.
+
+- [ ] M4a Config scaffold: `parse/config.py` (JSON load with problems, a key's line by text search), `rules/config.py` (hook handlers from settings, plugin `hooks.json`, `plugin.json` and component frontmatter, each tagged with its source; MCP servers), stub modules `hooks.py`, `hook_commands.py`, `settings.py`, `permissions.py`, `mcp.py`, `secrets.py`, `duplication.py` imported once in `rules/__init__.py`
+- [ ] M4b `~/.claude.json` read safely (`discover.py`, `model.py`, `tests/test_rule_catalog.py`): only `mcpServers` and `projects[<repo root>].mcpServers` extracted into a Rig field, no Artifact (so neither `Rig.text` nor the reports ever hold the file); a `{REPO}` fixture placeholder
+- [ ] M4c Hook structure in `rules/hooks.py`: `hook-event-unknown`, `hook-handler-invalid`, `hook-matcher-mcp-exact`, `hook-matcher-unanchored`, `hook-if-ignored`, `hook-once-ignored`, `hook-timeout-long` (HK1–6, HK13)
+- [ ] M4d Hook commands in `rules/hook_commands.py` and `parse/shell.py`: `hook-script-missing`, `hook-exit-1-blocking`, `hook-placeholder-unquoted`, `hook-exec-form-spawn`, `hook-reprints-instructions` (HK7–10, CM17)
+- [ ] M4e Settings schema in `rules/settings.py`: `settings-json-invalid`, `settings-schema-invalid` (ST1), the SchemaStore schema vendored at a pinned commit under `src/rigcheck/data/` with attribution and `scripts/update_schema.py`
+- [ ] M4f Permissions in `parse/permissions.py` and `rules/permissions.py`: `permission-allow-shadowed`, `permission-path-tool-ignored`, `permission-bash-wildcard` rules, `secret-file-not-denied` (ST2, ST3, ST5, ST6); the grammar also unblocks SK22/SK24's "not covered by `allowed-tools`"
+- [ ] M4g Settings scope in `rules/settings.py` (after M4e): `settings-key-managed-only`, `settings-mcp-autoapprove-committed`, `settings-local-tracked`, `claude-md-exclude-relative` (ST10–13)
+- [ ] M4h Secrets in `parse/secrets.py` and `rules/secrets.py`: `secret-literal` (sota #5) over instruction, memory, skill and agent files, `skill-remote-exec` (SK28); messages redact the value
+- [ ] M4i MCP in `rules/mcp.py` (after M4b and M4h): `mcp-secret-literal`, `mcp-credential-var-remote`, `mcp-project-dir-no-default`, `mcp-type-invalid`, `mcp-server-conflict` (MC1, MC3–6)
+- [ ] M4j Duplication in `rules/duplication.py`: `duplicate-line` (info) across every-turn files
 
 ### Wave 3 — M5 to M7 (CLI surface and packs, in order)
 
@@ -57,6 +70,7 @@ Leftovers from the M2 reviews, all in `src/rigcheck/rules/references.py` (`refer
 - [x] `:line` is stripped before the scheme check, so `tel:5550100` reads as file `tel` at line 5550100 and can be reported as a broken memory link; check for a scheme (one with no `.` in it, so `a.md:12` stays a file) before stripping `:line`
 - [x] `..` paths that leave the repo are checked on disk. Ruling (user, 2026-09-27), replacing M2b's skip: a `../` path is resolved beside the mentioning file and reported by `reference-path-missing` under the same parent-folder rule; other absolute paths stay skipped. It came from D:/yaat `CLAUDE.md:109`, which names `docs/crc-update.md` from the sibling D:/yaat-server: that finding is correct (the fix in yaat is to write `../yaat-server/docs/crc-update.md`), and a repo that wants otherwise suppresses it once M5 ships
 - [x] A flat memory link such as `[build](Makefile:12)` reads as the scheme `Makefile:`, so a missing `Makefile` is not reported (the cost of recognising dotless schemes like `tel:` before `:line` is stripped, in `reference_path`). Ruling (user, 2026-09-27): treat only a known list of schemes (`tel`, `mailto`, `http`, `https`, `vscode`, `file`, …) as schemes before the `:line` strip
+- [ ] MC7: MCP server instructions over 2,048 characters. Needs the server's own output (starting or contacting it), which offline-by-default forbids; left out of v1 (user, 2026-09-27)
 - [x] M3 frontmatter ruling (user, 2026-09-27): skill and agent frontmatter is parsed as leniently as Claude Code parses it, every rule runs on the result, and a file strict YAML rejects gets one portability warn
 
 ## Decisions (user, 2026-09-27)
