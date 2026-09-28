@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from rigcheck.discover import MAX_BYTES, discover, memory_dir
-from rigcheck.model import DEFAULT_WINDOW, Kind, Layer
+from rigcheck.model import DEFAULT_WINDOW, Kind, Layer, McpScope
 from rigcheck.rules import REGISTRY
 from support import FIXTURES, Workspace, git_add, run_json, symlink_or_skip, write
 
@@ -50,6 +50,14 @@ def _resolve_home_placeholders(workspace: Workspace) -> None:
     write(installed, installed.read_text(encoding="utf-8").replace("{HOME}", workspace.home.as_posix()))
 
 
+def _resolve_claude_json_placeholders(workspace: Workspace, rig: Path) -> None:
+    claude_json = workspace.home / ".claude.json"
+    if not claude_json.is_file():
+        return
+    text = claude_json.read_text(encoding="utf-8").replace("{HOME}", workspace.home.as_posix()).replace("{REPO}", rig.resolve().as_posix())
+    write(claude_json, text)
+
+
 def _prepare(rule_id: str, variant: str, workspace: Workspace) -> Path:
     fixture = FIXTURES / rule_id
     for home_source in (fixture / variant / "home", fixture / "home"):
@@ -60,6 +68,7 @@ def _prepare(rule_id: str, variant: str, workspace: Workspace) -> Path:
     rig = workspace.home / "work" / variant
     excluded = ["home", "memory"]
     shutil.copytree(fixture / variant, rig, ignore=lambda directory, _names: excluded if Path(directory) == fixture / variant else [])
+    _resolve_claude_json_placeholders(workspace, rig)
     memory_source = fixture / variant / "memory"
     if memory_source.is_dir():
         shutil.copytree(memory_source, memory_dir(rig.resolve(), workspace.home.resolve()), dirs_exist_ok=True)
@@ -85,6 +94,18 @@ def test_prepare_resolves_plugin_install_paths(workspace: Workspace, tmp_path: P
     expected = workspace.home / ".claude" / "plugins" / "cache" / "demo" / "skills" / "x" / "SKILL.md"
     assert [artifact.path for artifact in artifacts] == [expected]
     assert artifacts[0].kind is Kind.SKILL
+
+
+def test_prepare_resolves_claude_json_placeholders(workspace: Workspace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fixtures = tmp_path / "catalog-fixtures"
+    home = fixtures / "demo-rule" / "bad" / "home"
+    data = {"mcpServers": {"user": {"command": "{HOME}/bin/server"}}, "projects": {"{REPO}": {"mcpServers": {"local": {}}}}}
+    write(home / ".claude.json", json.dumps(data))
+    monkeypatch.setattr("test_rule_catalog.FIXTURES", fixtures)
+    rig = _prepare("demo-rule", "bad", workspace)
+    servers = discover(rig, workspace.home, DEFAULT_WINDOW).user_mcp_servers
+    assert [(server.scope, server.name) for server in servers] == [(McpScope.USER, "user"), (McpScope.LOCAL, "local")]
+    assert servers[0].config == {"command": f"{workspace.home.as_posix()}/bin/server"}
 
 
 @pytest.mark.parametrize("rule_id", sorted(REGISTRY))

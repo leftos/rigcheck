@@ -4,7 +4,7 @@ import shutil
 import subprocess
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from functools import cached_property
 from pathlib import Path
 
@@ -77,6 +77,29 @@ class Artifact:
     plugin: str | None = None
     imported_from: Path | None = None
     import_depth: int = 0
+
+
+class McpScope(StrEnum):
+    """Which part of ``~/.claude.json`` an MCP server is declared in."""
+
+    USER = "user"
+    LOCAL = "local"
+
+
+@dataclass(frozen=True)
+class UserMcpServer:
+    """One MCP server declared in ``~/.claude.json``.
+
+    Attributes:
+        scope: USER for the top-level ``mcpServers``; LOCAL for the checked repo's ``projects`` entry.
+        name: The server's name, the key it is declared under.
+        config: The raw config value as parsed from the file. It may hold secrets (tokens, keys, headers),
+            so it must never be put in a finding message or a report.
+    """
+
+    scope: McpScope
+    name: str
+    config: object
 
 
 @dataclass(frozen=True)
@@ -153,6 +176,8 @@ class Rig:
     """The discovered setup: every artifact plus the problems met while finding them.
 
     Attributes:
+        user_mcp_servers: The MCP servers ``~/.claude.json`` declares for this target, user scope first, then local scope.
+            The file itself is never an artifact.
         window: The model's context window, in tokens.
     """
 
@@ -161,6 +186,7 @@ class Rig:
     home: Path
     artifacts: tuple[Artifact, ...]
     problems: tuple[str, ...]
+    user_mcp_servers: tuple[UserMcpServer, ...]
     window: int
     _texts: dict[Path, str] = field(default_factory=dict, init=False, repr=False, compare=False)
 

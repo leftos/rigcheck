@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from rigcheck.model import Artifact, Kind, Layer, LoadClass, Rig, git_output, unc_link_target
+from rigcheck.model import Artifact, Kind, Layer, LoadClass, McpScope, Rig, UserMcpServer, git_output, unc_link_target
 from rigcheck.parse import frontmatter
 from rigcheck.parse.markdown import Import, find_imports, strip_html_comments
 
@@ -507,11 +507,83 @@ def _repo_root(target: Path) -> tuple[Path, bool]:
     return Path(output.strip()), True
 
 
+def _folder_key(raw: str) -> str:
+    return os.path.normcase(os.path.normpath(raw))
+
+
+def _named_servers(value: object, scope: McpScope) -> list[UserMcpServer]:
+    if not isinstance(value, dict):
+        return []
+    return [UserMcpServer(scope=scope, name=name, config=config) for name, config in value.items() if isinstance(name, str)]
+
+
+def _read_claude_json(path: Path) -> tuple[str | None, str | None]:
+    """Return ``path``'s text, or a problem that names the file and the error kind only; neither when it is missing."""
+    link = unc_link_target(path)
+    if link is not None:
+        return None, f"{path}: links to a network path ({link}); not read"
+    if not path.is_file():
+        return None, None
+    try:
+        return path.read_bytes().decode("utf-8-sig"), None
+    except OSError as exc:
+        return None, f"{path}: cannot read ({exc.strerror or type(exc).__name__})"
+    except UnicodeDecodeError:
+        return None, f"{path}: not valid UTF-8"
+
+
+def _load_claude_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """Parse ``path`` into its top-level object, or return a problem that names the file and the error kind only."""
+    text, problem = _read_claude_json(path)
+    if text is None:
+        return None, problem
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        return None, f"{path}: not valid JSON (line {exc.lineno})"
+    if not isinstance(data, dict):
+        return None, f"{path}: top level is not a JSON object"
+    return data, None
+
+
+def _local_servers(data: dict[str, Any], repo_root: Path) -> list[UserMcpServer]:
+    projects = data.get("projects")
+    if not isinstance(projects, dict):
+        return []
+    wanted = _folder_key(str(repo_root))
+    for key, entry in projects.items():
+        if isinstance(key, str) and isinstance(entry, dict) and _folder_key(key) == wanted:
+            return _named_servers(entry.get("mcpServers"), McpScope.LOCAL)
+    return []
+
+
+def _claude_json_servers(home: Path, repo_root: Path | None) -> tuple[tuple[UserMcpServer, ...], tuple[str, ...]]:
+    """Return the MCP servers ``~/.claude.json`` declares, and the problems met reading it.
+
+    The file holds credentials, so it is parsed here directly and never cached or made an artifact; problems name the
+    file and the error kind, never its content.
+
+    Args:
+        home: The home directory holding ``.claude.json``.
+        repo_root: The checked repository's root, whose ``projects`` entry supplies local-scope servers; None for the home check.
+
+    Returns:
+        The user-scope servers then the local-scope ones, each in file order, and the discovery problems.
+    """
+    data, problem = _load_claude_json(home / ".claude.json")
+    if data is None:
+        return (), (() if problem is None else (problem,))
+    servers = _named_servers(data.get("mcpServers"), McpScope.USER)
+    if repo_root is not None:
+        servers.extend(_local_servers(data, repo_root))
+    return tuple(servers), ()
+
+
 def discover(target: Path, home: Path, window: int) -> Rig:
     """Discover the effective setup Claude Code loads for ``target``.
 
     Problems with unreadable or malformed inputs are collected in ``Rig.problems``; discovery never raises for them.
-    Only this project's own memory folder is read, and ``~/.claude.json`` is never read.
+    Only this project's own memory folder is read, and ``~/.claude.json`` is read only for its MCP servers, never as an artifact.
     When ``target`` is the home directory itself, only ``~/.claude`` is discovered: no repo-layer chain at home and no nested ``CLAUDE.md`` walk.
 
     Args:
@@ -530,4 +602,14 @@ def discover(target: Path, home: Path, window: int) -> Rig:
     _add_claude_dirs(b)
     _add_plugins(b)
     _add_memory(b)
-    return Rig(target=target, repo_root=repo_root, home=home, artifacts=tuple(b.artifacts.values()), problems=tuple(b.problems), window=window)
+    servers, problems = _claude_json_servers(home, None if b.home_target else repo_root)
+    b.problems.extend(problems)
+    return Rig(
+        target=target,
+        repo_root=repo_root,
+        home=home,
+        artifacts=tuple(b.artifacts.values()),
+        problems=tuple(b.problems),
+        user_mcp_servers=servers,
+        window=window,
+    )
