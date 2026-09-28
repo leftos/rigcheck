@@ -15,6 +15,9 @@ _OPEN = "{["
 _CLOSE = "}]"
 """The characters that close a container."""
 
+_BRACKETS = _OPEN + _CLOSE
+"""Every character that opens or closes a container."""
+
 
 @dataclass(frozen=True)
 class JsonDoc:
@@ -53,22 +56,23 @@ def load(text: str) -> JsonDoc:
 
 
 def key_line(text: str, path: tuple[str, ...]) -> int | None:
-    """Return the 1-based line where the last key of ``path`` is written as an object key.
+    """Return the 1-based line of the last object key that completes ``path``.
 
     The path is read from the document's root object inwards through object keys only, so
     ``("hooks",)`` is a top-level key and ``("mcpServers", "b")`` is key ``b`` of the top-level
-    ``mcpServers`` object. Keys are compared by their decoded text, so a key holding non-ASCII
-    characters is found whether it is written literally or through JSON unicode escapes. A quoted
-    text that only looks like a key, standing inside a string value or inside an array, does not
-    count.
+    ``mcpServers`` object. A key written more than once resolves to its last occurrence, which is
+    the one a JSON loader keeps. Keys are compared by their decoded text, so a key holding
+    non-ASCII characters is found whether it is written literally or through JSON unicode escapes.
+    A quoted text that only looks like a key, standing inside a string value or inside an array,
+    does not count.
 
     Args:
         text: The file's content.
         path: The key names to walk, outermost first.
 
     Returns:
-        The line of the first key that completes the path, or None when the path is absent or the
-        text does not scan as JSON.
+        The line of the last key that completes the path, or None when no key does or the text does
+        not scan as JSON.
     """
     if not path:
         return None
@@ -83,7 +87,8 @@ class _Frame:
         kind: ``"o"`` for an object, ``"a"`` for an array.
         chain: The index in the sought path that this object's keys are compared against, or None
             when the object is not on the path.
-        pending: The name of the key whose value this object is reading, or None.
+        pending: The name of the key whose value this object is reading, held only while that key
+            matches the path and only until its value begins or the object reads another key.
     """
 
     kind: str
@@ -102,6 +107,8 @@ class _Scanner:
         path: The keys to reach, from the root object inwards.
         stack: The containers currently open, outermost first.
         line: The 1-based line the walk has reached.
+        found: The line of the last key that completed the path, or None while none has.
+        broken: True once the walk meets text it cannot scan, which voids the whole result.
     """
 
     def __init__(self, text: str, path: tuple[str, ...]) -> None:
@@ -109,39 +116,41 @@ class _Scanner:
         self.path = path
         self.stack: list[_Frame] = []
         self.line = 1
+        self.found: int | None = None
+        self.broken = False
 
     def run(self) -> int | None:
-        """Return the line of the path's last key, or None when the path is absent or the text does not scan."""
+        """Return the line of the last key completing the path, or None when none does or the text does not scan."""
         index = 0
-        while index < len(self.text):
+        while index < len(self.text) and not self.broken:
             char = self.text[index]
             if char == '"':
-                found, index = self._string(index)
-            elif char in _OPEN or char in _CLOSE:
+                index = self._string(index)
+            elif char in _BRACKETS:
                 self._bracket(char)
-                found, index = None, index + 1
+                index += 1
             else:
-                found, index = None, index + 1
                 if char == "\n":
                     self.line += 1
-            if found is not None:
-                return found
-        return None
+                index += 1
+        return None if self.broken else self.found
 
     def _bracket(self, char: str) -> None:
-        """Push the container ``char`` opens, or pop the one it closes."""
+        """Push the container ``char`` opens, or pop the one it closes; a close with nothing open breaks the walk."""
         if char in _OPEN:
             self._open(char)
-        elif self.stack:
+        elif not self.stack:
+            self.broken = True
+        else:
             self.stack.pop()
 
     def _open(self, char: str) -> None:
-        """Push the container ``char`` opens, carrying the path depth its keys are compared at."""
-        if char == "[":
-            self.stack.append(_Frame(kind="a"))
-            return
+        """Push the container ``char`` opens, an object taking a path depth from the key it follows."""
         parent = self.stack[-1] if self.stack else None
-        self.stack.append(_Frame(kind="o", chain=self._chain(parent)))
+        chain = self._chain(parent) if char == "{" else None
+        if parent is not None:
+            parent.pending = None
+        self.stack.append(_Frame(kind="o" if char == "{" else "a", chain=chain))
 
     def _chain(self, parent: _Frame | None) -> int | None:
         """Return the depth this object's keys are compared at: 0 at the root, one past a matched key, else None."""
@@ -151,14 +160,16 @@ class _Scanner:
             return None
         return parent.chain + 1
 
-    def _string(self, start: int) -> tuple[int | None, int]:
-        """Read the string whose opening quote is at ``start``; return the line found and the index after it."""
+    def _string(self, start: int) -> int:
+        """Read the string whose opening quote is at ``start``; return the index just after it."""
         end = self._string_end(start)
         if end is None:
-            return None, len(self.text)
-        found = self._key(self.stack[-1] if self.stack else None, start, end)
+            self.broken = True
+            return len(self.text)
+        if self.stack and self.stack[-1].kind == "o":
+            self._key(self.stack[-1], start, end)
         self.line += self.text.count("\n", start, end)
-        return found, end + 1
+        return end + 1
 
     def _string_end(self, start: int) -> int | None:
         """Return the index of the quote that closes the string opened at ``start``, or None when it never closes."""
@@ -173,17 +184,19 @@ class _Scanner:
             index += 1
         return None
 
-    def _key(self, frame: _Frame | None, start: int, end: int) -> int | None:
-        """Return the line when the string at ``start`` is the key the object ``frame`` is looking for."""
-        if frame is None or frame.kind != "o" or not _is_key(self.text, end + 1):
-            return None
+    def _key(self, frame: _Frame, start: int, end: int) -> None:
+        """Record a string ``frame`` reads: a value ends the key before it, a matching key passes the path on."""
+        frame.pending = None
+        chain = frame.chain
+        if chain is None or not _is_key(self.text, end + 1):
+            return
         name = _decoded(self.text[start : end + 1])
-        if name is None or frame.chain is None or name != self.path[frame.chain]:
-            return None
-        if frame.chain == len(self.path) - 1:
-            return self.line
-        frame.pending = name
-        return None
+        if name is None or name != self.path[chain]:
+            return
+        if chain == len(self.path) - 1:
+            self.found = self.line
+        else:
+            frame.pending = name
 
 
 def _is_key(text: str, index: int) -> bool:

@@ -101,8 +101,22 @@ def test_mcp_servers_cover_every_source(workspace: Workspace) -> None:
     assert next(server for server in servers if server.source is McpSource.REPO_FILE).config == {"command": "npx"}
 
     bare = workspace.rig("bare")
-    write(bare / ".mcp.json", json.dumps({"other": {}}))
+    write(bare / ".mcp.json", json.dumps({"other": {"command": "npx"}}))
     assert list(mcp_servers(_rig(bare, workspace))) == []
+
+
+def test_flat_plugin_mcp_file_yields_its_servers(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    write(repo / ".claude" / "settings.json", json.dumps({"enabledPlugins": {PLUGIN: True}}))
+    install = _install(workspace)
+    write(install / ".mcp.json", json.dumps({"github": {"type": "http", "url": "https://x"}}))
+
+    servers = list(mcp_servers(_rig(repo, workspace)))
+    assert [(server.source, server.name, server.line) for server in servers] == [(McpSource.PLUGIN_FILE, "github", 1)]
+    assert servers[0].config == {"type": "http", "url": "https://x"}
+
+    write(install / ".mcp.json", json.dumps({"mcpServers": "not an object"}))
+    assert list(mcp_servers(_rig(repo, workspace))) == []
 
 
 def test_hook_map_line_points_at_the_hooks_key(workspace: Workspace) -> None:

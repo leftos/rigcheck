@@ -190,25 +190,39 @@ def handlers(hook_map: HookMap) -> Iterator[HookHandler]:
 
 
 def _mcp_servers(rig: Rig, artifact: Artifact, source: McpSource) -> Iterator[McpServer]:
-    """Yield the servers a JSON artifact holds under a top-level ``mcpServers`` object."""
+    """Yield the servers one JSON config file defines.
+
+    Servers wrapped in a top-level ``mcpServers`` object are read from it. Many published plugins
+    instead name their servers at the top level itself, so a plugin file with no ``mcpServers`` key
+    is read flat. A repo file is not, and an ``mcpServers`` key that is present but not an object
+    yields nothing rather than falling back to the flat reading.
+    """
     text = rig.text(artifact.path)
     doc = config.load(text)
     if not isinstance(doc.data, dict):
         return
-    servers = doc.data.get("mcpServers")
+    if "mcpServers" in doc.data:
+        servers = doc.data["mcpServers"]
+        prefix: tuple[str, ...] = ("mcpServers",)
+    elif source is McpSource.PLUGIN_FILE:
+        servers = doc.data
+        prefix = ()
+    else:
+        return
     if not isinstance(servers, dict):
         return
     for name, server in servers.items():
         if isinstance(name, str):
-            yield McpServer(artifact, source, name, server, config.key_line(text, ("mcpServers", name)))
+            yield McpServer(artifact, source, name, server, config.key_line(text, (*prefix, name)))
 
 
 def mcp_servers(rig: Rig) -> Iterator[McpServer]:
     """Yield every MCP server the rig defines, in the order discovery recorded their artifacts.
 
-    A repo or plugin ``.mcp.json`` and a plugin manifest hold their servers under a top-level
-    ``mcpServers`` object. A file without that object, with one that is not an object, or with a
-    server whose name is not a string defines none.
+    A repo ``.mcp.json``, a plugin ``.mcp.json`` and a plugin manifest normally hold their servers
+    under a top-level ``mcpServers`` object. A plugin ``.mcp.json`` with no ``mcpServers`` key holds
+    its servers flat, one per top-level string key. A repo file without that object, a file with one
+    that is not an object, and a server whose name is not a string all define none.
 
     Args:
         rig: The discovered setup.

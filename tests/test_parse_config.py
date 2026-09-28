@@ -77,3 +77,12 @@ def test_key_line_absent_or_unscannable() -> None:
     assert config.key_line('{"a": 1}', ("hooks",)) is None
     assert config.key_line('{"a": [{"b": 1}]}', ("a", "b")) is None
     assert config.key_line('{"b": "unterminated', ("b", "c")) is None
+
+
+def test_key_line_forgets_a_key_after_its_value() -> None:
+    assert config.key_line('{"a": 1,\n"c": {\n"b": 2}}', ("a", "b")) is None
+    assert config.key_line('{"a": {"x": 1},\n"c": {"b": 2},\n"a2": 0}', ("a", "b")) is None
+
+
+def test_key_line_reports_the_last_duplicate() -> None:
+    assert config.key_line('{"hooks": 1,\n"hooks": {}}', ("hooks",)) == 2
