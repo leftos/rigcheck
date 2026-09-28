@@ -9,7 +9,7 @@ The generic loop is the user-level `nextup` skill; this file supplies only what 
 
 ## Plan and tracker
 
-- Index: `docs/plans/MAIN.md`, section `## Current focus`, then `## Next up`, then `## Backlog`. Each milestone line points into `docs/plans/v1.md` (approved 2026-09-27): its rule catalog names every rule by the research id it cites (`CM2`, `SK4`, `HK3`, `sota:#2`), and `docs/research/official.md` / `sota.md` hold each id's quote, check type and suggested severity. Read the id's entry there before writing a brief; never cite a rule from memory.
+- Index: `docs/plans/MAIN.md`, section `## Current focus`, then `## Next up`, then `## Backlog`. Each milestone line points into `docs/plans/v1.md`: its rule catalog names every rule by the research id it cites (`CM2`, `SK4`, `HK3`, `sota:#2`), and `docs/research/official.md` / `sota.md` hold each id's quote, check type and suggested severity. Read the id's entry there before writing a brief; never cite a rule from memory.
 - A milestone line that is too big for one brief (about 100 implementer calls: up to four steps or six files) is a *design* item: split it into lettered sub-items (`M3a`, `M3b`) in MAIN.md, grouped by rule module, and land the split before dispatching.
 - Siblings: none.
 - Pre-loop hooks: none.
@@ -24,7 +24,7 @@ The generic loop is the user-level `nextup` skill; this file supplies only what 
 - **Offline by default:** no network and no model calls outside `--deep`; rigcheck never edits the files it checks.
 - **Secrets:** never read `~/.claude.json` whole, and never print file contents from the real home in a report or log; smoke runs against `$HOME` report counts only.
 
-- **Decision round** (user, 2026-09-27: "I trust you to make good technical decisions as long as you ground them on validations against the various repos that I have"): a technical open decision (a matcher boundary, a fallback, a severity inside a documented range, how to fix a false positive) is settled by the orchestrator when the smoke script confirms the approach on the real repos, and recorded in MAIN.md as "orchestrator, validated by smoke". The user is asked only when the smoke corpus cannot exercise the case, for a scope or product call (what a rule covers, a new dependency, moving work between milestones), or when the docs and a probe disagree.
+- **Decision round**: the user trusts technical decisions that are grounded in validation against their repos, so a technical open decision (a matcher boundary, a fallback, a severity inside a documented range, how to fix a false positive) is settled by the orchestrator when the smoke script confirms the approach on the real repos, and recorded in MAIN.md as "orchestrator, validated by smoke". The user is asked only when the smoke corpus cannot exercise the case, for a scope or product call (what a rule covers, a new dependency, moving work between milestones), or when the docs and a probe disagree.
 
 ## Agents and gates
 
@@ -35,7 +35,7 @@ The generic loop is the user-level `nextup` skill; this file supplies only what 
   - `uv run ruff check .`
   - `uv run ty check`
   - `nice -n 10 uv run pytest` (scoped with `-k <rule-id>` during a step, whole suite once at the end)
-  - Smoke after any discovery or rule change (user, 2026-09-27: every recently active repo on D:/, not only yaat): `bash .claude/skills/rigcheck-nextup/smoke.sh > .tmp/smoke.log 2>&1; rc=$?; cat .tmp/smoke.log; (exit $rc)` from the worktree root. It checks every git repo under D:/ with a commit in the last 30 days (rigcheck excluded) plus `$HOME`, writes `.tmp/smoke/<name>.json`, prints counts only (user and plugin layers once, repo layer per repo), and fails on an `internal-error`. Compare against the same script's output on `main`; a new rule's hits on real repos are read before landing, and a jump in one rule is a false-positive suspect to bring to the user.
+  - Smoke after any discovery or rule change: `bash .claude/skills/rigcheck-nextup/smoke.sh > .tmp/smoke.log 2>&1; rc=$?; cat .tmp/smoke.log; (exit $rc)` from the worktree root. It checks every git repo under D:/ with a commit in the last 30 days (rigcheck excluded) plus `$HOME`, writes `.tmp/smoke/<name>.json`, prints counts only (user and plugin layers once, repo layer per repo), and fails on an `internal-error`. Compare against the same script's output on `main`; a new rule's hits on real repos are read before landing, and a jump in one rule is a false-positive suspect to bring to the user.
 - Parent-side gate: `git -C <wt> status --short` in the worktree and in the main checkout.
 
 ## Traps
