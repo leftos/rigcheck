@@ -507,10 +507,6 @@ def _repo_root(target: Path) -> tuple[Path, bool]:
     return Path(output.strip()), True
 
 
-def _folder_key(raw: str) -> str:
-    return os.path.normcase(os.path.normpath(raw))
-
-
 def _named_servers(value: object, scope: McpScope) -> list[UserMcpServer]:
     if not isinstance(value, dict):
         return []
@@ -541,6 +537,8 @@ def _load_claude_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
         return None, f"{path}: not valid JSON (line {exc.lineno})"
+    except (ValueError, RecursionError) as exc:
+        return None, f"{path}: not loadable JSON ({type(exc).__name__})"
     if not isinstance(data, dict):
         return None, f"{path}: top level is not a JSON object"
     return data, None
@@ -550,9 +548,9 @@ def _local_servers(data: dict[str, Any], repo_root: Path) -> list[UserMcpServer]
     projects = data.get("projects")
     if not isinstance(projects, dict):
         return []
-    wanted = _folder_key(str(repo_root))
+    wanted = path_key(repo_root)
     for key, entry in projects.items():
-        if isinstance(key, str) and isinstance(entry, dict) and _folder_key(key) == wanted:
+        if isinstance(key, str) and isinstance(entry, dict) and path_key(Path(key)) == wanted:
             return _named_servers(entry.get("mcpServers"), McpScope.LOCAL)
     return []
 

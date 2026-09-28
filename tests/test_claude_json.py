@@ -82,6 +82,20 @@ def test_invalid_claude_json_is_a_problem_without_content(workspace: Workspace, 
         assert MARKER not in output
 
 
+def test_claude_json_huge_number_is_a_problem(workspace: Workspace) -> None:
+    path = write(workspace.home / ".claude.json", '{"n": ' + "1" * 5000 + "}")
+    rig = discover(workspace.rig(), workspace.home, DEFAULT_WINDOW)
+    assert rig.user_mcp_servers == ()
+    assert rig.problems == (f"{path}: not loadable JSON (ValueError)",)
+
+
+def test_claude_json_deep_nesting_is_a_problem(workspace: Workspace) -> None:
+    path = write(workspace.home / ".claude.json", "[" * 100000)
+    rig = discover(workspace.rig(), workspace.home, DEFAULT_WINDOW)
+    assert rig.user_mcp_servers == ()
+    assert rig.problems == (f"{path}: not loadable JSON (RecursionError)",)
+
+
 def test_unc_linked_claude_json_is_not_read(workspace: Workspace) -> None:
     target = r"\\server\share\.claude.json" if os.name == "nt" else "//server/share/.claude.json"
     link = workspace.home / ".claude.json"
