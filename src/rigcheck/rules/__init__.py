@@ -71,10 +71,17 @@ import rigcheck.rules.agents  # noqa: E402 - imported for its registrations
 import rigcheck.rules.budget  # noqa: E402 - imported for its registrations
 import rigcheck.rules.commands  # noqa: E402 - imported for its registrations
 import rigcheck.rules.components  # noqa: E402 - imported for its registrations
+import rigcheck.rules.duplication  # noqa: E402 - imported for its registrations
+import rigcheck.rules.hook_commands  # noqa: E402 - imported for its registrations
+import rigcheck.rules.hooks  # noqa: E402 - imported for its registrations
 import rigcheck.rules.instructions  # noqa: E402 - imported for its registrations
+import rigcheck.rules.mcp  # noqa: E402 - imported for its registrations
 import rigcheck.rules.memory  # noqa: E402 - imported for its registrations
 import rigcheck.rules.output_styles  # noqa: E402 - imported for its registrations
+import rigcheck.rules.permissions  # noqa: E402 - imported for its registrations
 import rigcheck.rules.references  # noqa: E402 - imported for its registrations
 import rigcheck.rules.rules_dir  # noqa: E402 - imported for its registrations
+import rigcheck.rules.secrets  # noqa: E402 - imported for its registrations
+import rigcheck.rules.settings  # noqa: E402 - imported for its registrations
 import rigcheck.rules.skill_body  # noqa: E402 - imported for its registrations
 import rigcheck.rules.skills  # noqa: E402, F401 - imported for its registrations
