@@ -15,6 +15,7 @@ The generic loop is the user-level `nextup` skill; this file supplies only what 
 - Pre-loop hooks: none.
 - Finished-item convention: **tick the line** (`- [x]`), never delete it. When every milestone of `v1.md` is ticked, `git mv` it to `docs/plans/archive/` in the landing commit.
 - Tracker: `gh issue list --repo leftos/rigcheck --state open --json number,title`. No triage skill; place issues by the step-0 rule.
+- Pull requests: `gh pr list --repo leftos/rigcheck --state open --json number,title,headRefName`. An open PR from an item's own `<slug>` branch is that item still landing: cite `#N` on its line and finish the landing (Landing, below). Any other PR gets a line by the step-0 rule.
 - Hotspots (two items touching one wait on each other): `src/rigcheck/model.py` (the `Kind`/`LoadClass` enums), `src/rigcheck/discover.py`, `src/rigcheck/rules/__init__.py` (the module import list), `tests/test_rule_catalog.py`.
 
 ## Rulings every brief carries
