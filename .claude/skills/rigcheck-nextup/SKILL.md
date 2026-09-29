@@ -64,5 +64,5 @@ The repo keeps no CHANGELOG yet.
 ## Landing
 
 - Each item is multi-file work, so it lands by PR (the user's standing authorisation for this repo: commit, push and merge as you go). Commit in the worktree with a ≤4-char type tag, imperative ≤72-char subject and the session's attribution trailers; `git push -u origin <slug>`; `gh pr create` with a body opening with the agent-authored marker line; wait for `gh pr checks <n> --watch` to pass on ubuntu and windows; `gh pr merge <n> --squash --delete-branch`.
-- Plan and docs-only commits (index edits, interview answers) go straight to `main` and are pushed.
+- Plan and docs-only commits (index edits, interview answers) go straight to `main` and are pushed. A session running from a worktree offers `/ship` for them instead of pushing (user-level `nextup`, "A worktree session offers a ship instead of a push").
 - Then, from the main checkout: `git pull`, `git worktree remove ../rigcheck.wt/<slug>`, `git branch -D <slug>` (a squash merge leaves the branch unmerged by ancestry; confirm the PR shows `MERGED` with `gh pr view <n> --json state` first).
