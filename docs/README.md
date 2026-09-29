@@ -16,3 +16,5 @@ Start here. The plan index is [plans/MAIN.md](plans/MAIN.md).
 - **Fix brief**: a Markdown file rigcheck writes that an agent can execute to fix a set of findings. rigcheck never edits the checked files itself.
 - **Frontmatter retry**: Claude Code's second parse of a frontmatter block that strict YAML rejects: it re-quotes unquoted values holding `: ` or a YAML indicator and parses again; rigcheck reproduces it, so `data` is what Claude Code loads ([research/frontmatter-probe.md](research/frontmatter-probe.md)).
 - **Suppression**: a per-repo config entry that silences a rule, globally or for a path; every suppression must carry a reason.
+- **Feature marker**: `branch: feat/<name>` on a `docs/plans/MAIN.md` line; every item under it lands on the `feat/<name>` branch instead of `main` (user-level `nextup` §3, "Feature branches").
+- **Feature PR**: the draft pull request from a marker's `feat/<name>` into `main`, opened with the marker and merged with `--rebase` by `/ship` once every line under the marker is ticked.
