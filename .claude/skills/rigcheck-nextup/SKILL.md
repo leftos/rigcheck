@@ -47,7 +47,7 @@ The generic loop is the user-level `nextup` skill; this file supplies only what 
 
 ## Concurrency
 
-- Worktrees: `git worktree add ../rigcheck.wt/<slug> -b <slug> main` from the main checkout.
+- Worktrees: `git worktree add ../rigcheck.wt/<slug> -b <slug> <base>` from the main checkout, then `branch.<slug>.base` and `branch.<slug>.landOn` recorded as the user-level `nextup` §3 **Base and target** says (`main` and `main` by default).
 - Ceiling: **two** implementers. Rule modules are separate files, but every new rule family also touches the hotspots above; pair a component-rules item with a config-rules item, never two items that add `Kind` values.
 - Context: read the status bar's figure at every landing (`jq .context_window.used_percentage <scratchpad>/statusline.json`); past 40% the loop stops refilling, per the user-level `nextup`.
 
@@ -64,6 +64,6 @@ The repo keeps no CHANGELOG yet.
 
 ## Landing
 
-- Each item is multi-file work, so it lands by PR (the user's standing authorisation for this repo: commit, push and merge as you go). Commit in the worktree with a ≤4-char type tag, imperative ≤72-char subject and the session's attribution trailers; `git push -u origin <slug>`; `gh pr create` with a body opening with the agent-authored marker line; wait for `gh pr checks <n> --watch` to pass on ubuntu and windows; `gh pr merge <n> --squash --delete-branch`.
+- Each item is multi-file work, so it lands by PR (the user's standing authorisation for this repo: commit, push and merge as you go). Commit in the worktree with a ≤4-char type tag, imperative ≤72-char subject and the session's attribution trailers; `git push -u origin <slug>`; `gh pr create --base <landOn>` with a body opening with the agent-authored marker line (a stacked item opens its PR once the item under it has merged, after `git rebase --onto origin/<landOn> <base sha> <slug>`, so the PR carries only its own commits); wait for `gh pr checks <n> --watch` to pass on ubuntu and windows; `gh pr merge <n> --squash --delete-branch`.
 - Plan and docs-only commits (index edits, interview answers) go straight to `main` and are pushed. A session running from a worktree offers `/ship` for them instead of pushing (user-level `nextup`, "A worktree session offers a ship instead of a push").
-- Then, from the main checkout: `git pull`, `git worktree remove ../rigcheck.wt/<slug>`, `git branch -D <slug>` (a squash merge leaves the branch unmerged by ancestry; confirm the PR shows `MERGED` with `gh pr view <n> --json state` first).
+- Then, from the main checkout: `git pull`, `git worktree remove ../rigcheck.wt/<slug>`, `git branch -D <slug>` (a squash merge leaves the branch unmerged by ancestry and folds its commits into one, so neither `merge-base --is-ancestor` nor `git cherry` reads it as landed; confirm the PR shows `MERGED` with `gh pr view <n> --json state` first).
