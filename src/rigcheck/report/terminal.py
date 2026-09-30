@@ -6,7 +6,7 @@ from typing import TextIO
 
 from rigcheck import __version__
 from rigcheck.engine import count_by_severity
-from rigcheck.model import Finding, Layer, Rig, Severity
+from rigcheck.model import Finding, Layer, LoadClass, Rig, Severity
 from rigcheck.report.budget import Budget, Listing, window_label
 
 _COLORS = {Severity.ERROR: "\x1b[31m", Severity.WARN: "\x1b[33m", Severity.INFO: "\x1b[36m"}
@@ -33,8 +33,19 @@ def display_path(rig: Rig, path: Path | None, layer: Layer | None) -> str:
         return path.as_posix()
 
 
+def is_setup_finding(finding: Finding) -> bool:
+    """Return True when the finding is about the whole setup rather than one file."""
+    return finding.layer is None and finding.load_class is LoadClass.EVERY_TURN
+
+
+def _finding_location(rig: Rig, finding: Finding) -> str:
+    if is_setup_finding(finding):
+        return "(setup)"
+    return display_path(rig, finding.path, finding.layer)
+
+
 def _finding_lines(rig: Rig, finding: Finding, color: bool) -> list[str]:
-    location = display_path(rig, finding.path, finding.layer)
+    location = _finding_location(rig, finding)
     if finding.line is not None:
         location += f":{finding.line}"
     severity = finding.severity.name
@@ -72,6 +83,24 @@ def _budget_lines(rig: Rig, budget: Budget, color: bool) -> list[str]:
     return lines
 
 
+def _group_lines(rig: Rig, findings: list[Finding], color: bool) -> list[str]:
+    setup = [finding for finding in findings if is_setup_finding(finding)]
+    lines: list[str] = []
+    if setup:
+        lines.append("")
+        lines.append("setup")
+        for finding in setup:
+            lines.extend(_finding_lines(rig, finding, color))
+    for group in _GROUPS:
+        members = [finding for finding in findings if not is_setup_finding(finding) and finding.layer is group]
+        if not members:
+            continue
+        lines.extend(["", group.value if group is not None else "rigcheck"])
+        for finding in members:
+            lines.extend(_finding_lines(rig, finding, color))
+    return lines
+
+
 def render(rig: Rig, findings: list[Finding], budget: Budget, *, color: bool) -> str:
     """Render the context budget and ranked findings as text, findings grouped by layer.
 
@@ -85,13 +114,7 @@ def render(rig: Rig, findings: list[Finding], budget: Budget, *, color: bool) ->
         The report, ending with a newline.
     """
     lines = [f"rigcheck {__version__} — {rig.target.as_posix()}", "", *_budget_lines(rig, budget, color)]
-    for group in _GROUPS:
-        members = [finding for finding in findings if finding.layer is group]
-        if not members:
-            continue
-        lines.extend(["", group.value if group is not None else "rigcheck"])
-        for finding in members:
-            lines.extend(_finding_lines(rig, finding, color))
+    lines.extend(_group_lines(rig, findings, color))
     counts = count_by_severity(findings)
     lines.extend(["", f"{counts[Severity.ERROR]} errors · {counts[Severity.WARN]} warnings · {counts[Severity.INFO]} info"])
     return "\n".join(lines) + "\n"

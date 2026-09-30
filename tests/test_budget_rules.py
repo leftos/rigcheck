@@ -61,4 +61,4 @@ def test_budget_finding_has_no_path(workspace: Workspace, capsys: pytest.Capture
     assert finding["layer"] is None
     assert finding["load_class"] == "every-turn"
     _, text = run_cli(capsys, rig, workspace.home, "text")
-    assert any(line.startswith("  (rigcheck)  WARN  skill-listing-over-budget  skill listing ≈") for line in text.splitlines())
+    assert any(line.startswith("  (setup)  WARN  skill-listing-over-budget  skill listing ≈") for line in text.splitlines())

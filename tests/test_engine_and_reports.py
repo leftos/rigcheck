@@ -93,6 +93,18 @@ def test_text_report_colors_only_when_asked(workspace: Workspace) -> None:
     assert not ANSI.search(terminal.render(rig, findings, report, color=False))
 
 
+def test_setup_findings_have_their_own_heading(workspace: Workspace) -> None:
+    rig = discover(workspace.rig(), workspace.home, DEFAULT_WINDOW)
+    setup = Finding("skill-listing-over-budget", Severity.WARN, None, None, "skill listing over budget", "Trim it.", None, LoadClass.EVERY_TURN)
+    fault = Finding("internal-error", Severity.ERROR, None, None, "boom", "Report it.", None, None)
+    lines = terminal.render(rig, [setup, fault], budget.compute(rig), color=False).splitlines()
+    assert "setup" in lines
+    assert "rigcheck" in lines
+    assert lines.index("setup") < lines.index("rigcheck")
+    assert any(line.startswith("  (setup)  WARN  skill-listing-over-budget  ") for line in lines)
+    assert any(line.startswith("  (rigcheck)  ERROR  internal-error  ") for line in lines)
+
+
 def _budget_rig(workspace: Workspace) -> Path:
     repo = workspace.rig()
     write(repo / "CLAUDE.md", "# Project\n\nUse uv.\n")
