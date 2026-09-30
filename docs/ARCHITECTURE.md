@@ -21,6 +21,7 @@ rigcheck is a local validator for the instruction layer of coding agents (`CLAUD
 | Add or change a hook command rule (script path, exec bit, placeholder quoting, exit code, reprinted instructions) | `src/rigcheck/rules/hook_commands.py` → `src/rigcheck/parse/shell.py` (segments, words, `script_word`, `unquoted_placeholders`) → `src/rigcheck/rules/config.py` (`hook_maps`, `handlers`) → `tests/test_hook_command_rules.py`, `tests/test_shell.py`, `tests/fixtures/hook-*/` | [`research/official.md`](research/official.md) HK7–HK10, CM17 |
 | Change the settings schema check, or report a config file that does not load | `src/rigcheck/rules/settings.py` (`settings_docs`, the error filter and wording) → `src/rigcheck/parse/config.py` (`load`, `JsonDoc.line`, `key_line`) → `tests/test_settings_rules.py`, `tests/test_parse_config.py` | [`research/official.md`](research/official.md) ST1 |
 | Refresh the vendored settings schema | `python scripts/update_schema.py <commit>` → `src/rigcheck/data/claude-code-settings.schema.json` and `.meta.json` (shipped as package data; `NOTICE` holds the attribution) → re-run `tests/test_settings_rules.py` and the smoke | [`plans/MAIN.md`](plans/MAIN.md) M4e |
+| Change permission-rule parsing or a permission rule (shadowing, path tools, Bash wildcards, secret files without a Read deny) | `src/rigcheck/parse/permissions.py` (`parse_rule`, `bash_covers`) → `src/rigcheck/rules/permissions.py` → `tests/test_parse_permissions.py`, `tests/test_permission_rules.py`, `tests/fixtures/permission-*/`, `tests/fixtures/secret-file-not-denied/` | [`research/permissions-grammar.md`](research/permissions-grammar.md) |
 | Change the context budget | `src/rigcheck/report/budget.py` → `src/rigcheck/rules/budget.py` → `tests/test_budget.py`, `tests/test_budget_rules.py` | [`plans/v1.md`](plans/v1.md) |
 | Change a report or the JSON schema | `src/rigcheck/report/terminal.py` or `json.py` → `tests/test_engine_and_reports.py` → the usage section of `README.md` | [`README.md`](../README.md) |
 | Add a CLI flag or command | `src/rigcheck/cli.py` → `tests/test_cli.py` → the usage section of `README.md` | [`README.md`](../README.md) |
@@ -38,7 +39,7 @@ One package, `src/rigcheck/`, built with `uv_build` (`pyproject.toml`); lint ban
 - **`report`** (`src/rigcheck/report/`): owns output: `terminal.py`, `json.py` (`SCHEMA_VERSION` 1) and `budget.py`, the context budget, which is a report and not a rule.
 - **`cli`** (`cli.py`): owns the `rigcheck check` command; it wires `discover`, `engine` and `report` and sets the exit status (0, 1 with a finding at or above `--fail-on`, 2 on a usage error).
 
-Rules modules `permissions.py`, `mcp.py`, `secrets.py` and `duplication.py` are docstring-only stubs; the config helpers they will use are in `rules/config.py`. What is planned is in [`plans/MAIN.md`](plans/MAIN.md).
+Rules modules `mcp.py`, `secrets.py` and `duplication.py` are docstring-only stubs; the config helpers they will use are in `rules/config.py`. What is planned is in [`plans/MAIN.md`](plans/MAIN.md).
 
 ## Integration Footguns
 

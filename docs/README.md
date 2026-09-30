@@ -22,6 +22,10 @@ Start here. The plan index is [plans/MAIN.md](plans/MAIN.md).
 - **Handler**: one hook to run, with a `type` (`command`, `http`, `mcp_tool`, `prompt` or `agent`) and the fields that type needs.
 - **Shell form / exec form**: the two ways a command hook names what to run: shell form is one `command` string a shell parses; exec form is a program in `command` plus an `args` list, spawned without a shell.
 - **Vendored schema**: the SchemaStore Claude Code settings schema, copied into `src/rigcheck/data/` at a pinned commit so the settings check runs offline; `scripts/update_schema.py` refreshes it.
+- **Permission rule**: one string in a settings file's `permissions.allow`, `ask` or `deny` list: a tool name, optionally with a specifier in parentheses (`Bash(git *)`, `Read(./.env)`).
+- **Specifier**: the part of a permission rule inside the parentheses: a command pattern for Bash, a path pattern for Read and Edit.
+- **Settings scope**: which settings file a rule or key comes from: `user` (`~/.claude/settings.json`), `project` (the repo's `.claude/settings.json`) or `local` (`.claude/settings.local.json`); Claude Code combines the permission lists of every scope.
+- **Shadowed**: an allow rule that a deny or ask rule in any scope already matches, so it never applies (deny, then ask, then allow; the first match wins).
 - **Suppression**: a per-repo config entry that silences a rule, globally or for a path; every suppression must carry a reason.
 - **Feature marker**: `branch: feat/<name>` on a `docs/plans/MAIN.md` line; every item under it lands on the `feat/<name>` branch instead of `main` (user-level `nextup` §3, "Feature branches").
 - **Feature PR**: the draft pull request from a marker's `feat/<name>` into `main`, opened with the marker and merged with `--rebase` by `/ship` once every line under the marker is ticked.
