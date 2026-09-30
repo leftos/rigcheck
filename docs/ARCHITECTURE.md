@@ -23,6 +23,7 @@ rigcheck is a local validator for the instruction layer of coding agents (`CLAUD
 | Add or change a settings scope rule (managed-only keys, committed MCP approval, tracked local settings, `claudeMdExcludes`) | `src/rigcheck/rules/settings.py` (`KEY_SCOPES`, `settings_docs`) → `src/rigcheck/parse/config.py` (`key_line`) → `src/rigcheck/model.py` (`Rig.is_tracked`) → `tests/test_settings_rules.py`, `tests/fixtures/<rule-id>/` (a `.gitfixture` makes files tracked) | [`rules/settings-and-permissions.md`](rules/settings-and-permissions.md) |
 | Refresh the vendored settings schema | `python scripts/update_schema.py <commit>` → `src/rigcheck/data/claude-code-settings.schema.json` and `.meta.json` (shipped as package data; `NOTICE` holds the attribution) → re-run `tests/test_settings_rules.py` and the smoke | [`rules/settings-and-permissions.md`](rules/settings-and-permissions.md) |
 | Change permission-rule parsing or a permission rule (shadowing, path tools, Bash wildcards, secret files without a Read deny) | `src/rigcheck/parse/permissions.py` (`parse_rule`, `bash_covers`) → `src/rigcheck/rules/permissions.py` → `tests/test_parse_permissions.py`, `tests/test_permission_rules.py`, `tests/fixtures/permission-*/`, `tests/fixtures/secret-file-not-denied/` | [`rules/settings-and-permissions.md`](rules/settings-and-permissions.md) |
+| Add or change a secret or remote-exec check | `src/rigcheck/parse/secrets.py` (`find_secrets`, `classify`) → `src/rigcheck/rules/secrets.py` → `src/rigcheck/parse/shell.py` (`pipeline`, `runs_inline`) → `tests/test_parse_secrets.py`, `tests/test_secret_rules.py`, `tests/fixtures/secret-literal/` (its token is built at runtime in `RUNTIME_SETUP` in `tests/test_rule_catalog.py`, so no pattern-valid token is committed) | [`rules/secrets.md`](rules/secrets.md) |
 | Change the context budget | `src/rigcheck/report/budget.py` → `src/rigcheck/rules/budget.py` → `tests/test_budget.py`, `tests/test_budget_rules.py` | [`rules/context-budget.md`](rules/context-budget.md) |
 | Change a report or the JSON schema | `src/rigcheck/report/terminal.py` or `json.py` → `tests/test_engine_and_reports.py` → the usage section of `README.md` | [`README.md`](../README.md) |
 | Add a CLI flag or command | `src/rigcheck/cli.py` → `tests/test_cli.py` → the usage section of `README.md` | [`README.md`](../README.md) |
@@ -40,7 +41,7 @@ One package, `src/rigcheck/`, built with `uv_build` (`pyproject.toml`); lint ban
 - **`report`** (`src/rigcheck/report/`): owns output: `terminal.py`, `json.py` (`SCHEMA_VERSION` 1) and `budget.py`, the context budget, which is a report and not a rule.
 - **`cli`** (`cli.py`): owns the `rigcheck check` command; it wires `discover`, `engine` and `report` and sets the exit status (0, 1 with a finding at or above `--fail-on`, 2 on a usage error).
 
-Rules modules `mcp.py`, `secrets.py` and `duplication.py` are docstring-only stubs; the config helpers they will use are in `src/rigcheck/rules/config.py`. What is planned is in [`plans/MAIN.md`](plans/MAIN.md).
+Rules modules `mcp.py` and `duplication.py` are docstring-only stubs; the config helpers they will use are in `src/rigcheck/rules/config.py`. What is planned is in [`plans/MAIN.md`](plans/MAIN.md).
 
 ## Integration Footguns
 
@@ -53,6 +54,7 @@ Rules modules `mcp.py`, `secrets.py` and `duplication.py` are docstring-only stu
 - **The built-in tool and agent tables** in `src/rigcheck/rules/agents.py` are a snapshot of one Claude Code version (recorded in `docs/research/builtin-tables-probe.md`); `src/rigcheck/rules/agent_refs.py` resolves against them, so a new Claude Code tool reads as `agent-tool-unknown` until they are updated.
 - **Rule catalog**: `docs/plans/v1.md` lists every rule id; a rule added, renamed or removed changes it too (the project's docs map says so, but no test checks it).
 - **Fixtures that need runtime setup** (UNC symlinks, a file past the size limit, external symlinked rule folders) are built by `RUNTIME_SETUP` in `tests/test_rule_catalog.py`, because the harness copies fixtures with `copytree`, which dereferences links.
+- **The `secret-literal` bad fixture holds no token**: `RUNTIME_SETUP` in `tests/test_rule_catalog.py` appends one built from string pieces, and tests build theirs the same way, so no committed file holds a pattern-valid token. A test or fixture that writes a whole token as one literal breaks this.
 - **Fixture files are written with LF**; a CRLF fixture changes the byte counts that size rules measure.
 
 ## Test locations
@@ -63,7 +65,7 @@ Rules modules `mcp.py`, `secrets.py` and `duplication.py` are docstring-only stu
 - `tests/test_discover.py`, `tests/test_claude_json.py`: discovery of each layer, and `~/.claude.json` server extraction.
 - `tests/test_engine_and_reports.py`, `tests/test_budget.py`, `tests/test_cli.py`: engine ranking, the two report formats, the budget and the command line.
 - `tests/test_parse_config.py`, `tests/test_parse_properties.py`, `tests/test_markdown.py`, `tests/test_globs.py`, `tests/test_references.py`: the parsers and shared reference logic (`test_parse_properties.py` holds property tests).
-- `tests/test_agent_rules.py`, `tests/test_agent_ref_rules.py`, `tests/test_skill_rules.py`, `tests/test_skill_name_rules.py`, `tests/test_skill_injection_rules.py`, `tests/test_rules_dir.py`, `tests/test_output_style_rules.py`, `tests/test_memory_rules.py`, `tests/test_budget_rules.py`, `tests/test_components.py`, `tests/test_config_helpers.py`: behavior beyond the fixtures for each rules module.
+- `tests/test_agent_rules.py`, `tests/test_agent_ref_rules.py`, `tests/test_skill_rules.py`, `tests/test_skill_name_rules.py`, `tests/test_skill_injection_rules.py`, `tests/test_rules_dir.py`, `tests/test_output_style_rules.py`, `tests/test_memory_rules.py`, `tests/test_secret_rules.py`, `tests/test_parse_secrets.py`, `tests/test_budget_rules.py`, `tests/test_components.py`, `tests/test_config_helpers.py`: behavior beyond the fixtures for each rules module.
 - The smoke script `.claude/skills/rigcheck-nextup/smoke.sh` runs rigcheck over real repos and `$HOME` after a discovery or rule change.
 
 ## Deep docs

@@ -99,6 +99,25 @@ def segments(raw: str) -> list[str]:
     return found
 
 
+def pipeline(raw: str) -> list[tuple[str, str]]:
+    """Split shell text like :func:`segments`, keeping the separator written before each segment.
+
+    Args:
+        raw: One line of shell text.
+
+    Returns:
+        ``(separator, segment)`` pairs in order: the separator is ``&&``, ``||``, ``;`` or ``|``, and empty for the first.
+    """
+    found = [("", "")]
+    for part in _SHELL_PARTS.findall(raw):
+        if part in _SEPARATORS:
+            found.append((part, ""))
+        else:
+            separator, text = found[-1]
+            found[-1] = (separator, text + part)
+    return found
+
+
 def words(segment: str) -> list[str]:
     """Split one shell command into words, quotes removed and backslashes kept; on unbalanced quotes, split on whitespace.
 
@@ -242,6 +261,27 @@ def _interpreted(parts: list[str]) -> str | None:
     if index is not None and program in _SUBCOMMAND_RUNNERS and parts[index] == "run":
         index = _operand(parts, index + 1, flags)
     return parts[index] if index is not None else None
+
+
+def runs_inline(parts: list[str]) -> bool:
+    """Return True when an interpreter command line holds that interpreter's inline-code or module flag.
+
+    The flags are the interpreter's own: ``-c`` or a short-flag group ending in ``c`` for POSIX shells, ``-c`` and
+    ``-m`` for Python, ``-e``, ``--eval``, ``-p`` and ``--print`` for Node, ``-e`` for Ruby, ``-e`` and ``-E`` for Perl,
+    and ``-Command``, ``-c``, ``-EncodedCommand`` and the like for PowerShell, whose flags ignore case. Other flags,
+    such as ``bash -e`` or ``python -E``, are not inline code.
+
+    Args:
+        parts: The command's words from its command word on.
+
+    Returns:
+        True when any word is such a flag; False for a program with no known flags.
+    """
+    program = program_name(parts[0])
+    if program in _POWERSHELL:
+        return any(_POWERSHELL_FLAGS.ends_search(word.lower()) for word in parts[1:])
+    flags = _INTERPRETER_FLAGS.get(program, _NO_FLAGS)
+    return any(flags.ends_search(word) for word in parts[1:])
 
 
 def _uv_rest(parts: list[str]) -> list[str] | None:
