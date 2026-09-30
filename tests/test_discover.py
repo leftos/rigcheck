@@ -10,7 +10,7 @@ from rigcheck import engine
 from rigcheck.discover import discover, encode_project, memory_dir
 from rigcheck.model import DEFAULT_WINDOW, Artifact, Kind, Layer, LoadClass, Rig
 from rigcheck.rules import REGISTRY
-from support import Workspace, symlink_or_skip, write
+from support import Workspace, git_add, symlink_or_skip, write
 
 PLUGIN = "tools@market"
 UNC_RULES = r"\\server\share\rules" if os.name == "nt" else "//server/share/rules"
@@ -490,3 +490,29 @@ def test_agents_local_and_override_are_recorded_not_loaded(workspace: Workspace)
     artifacts = _by_name(discover(repo, workspace.home, DEFAULT_WINDOW))
     assert artifacts["AGENTS.local.md"].load_class is LoadClass.NOT_LOADED
     assert artifacts["AGENTS.override.md"].load_class is LoadClass.NOT_LOADED
+
+
+def _docs(rig: Rig) -> list[Artifact]:
+    return [artifact for artifact in rig.artifacts if artifact.kind is Kind.DOC]
+
+
+def _doc_names(rig: Rig) -> list[str]:
+    return sorted(artifact.path.relative_to(rig.repo_root).as_posix() for artifact in _docs(rig))
+
+
+def test_repo_docs_leave_out_plans_archives_and_ignored_files(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    write(repo / ".gitignore", "docs/ignored.md\n")
+    for name in ("docs/a.md", "docs/plans/p.md", "docs/x/archive/old.md", "docs/ignored.md"):
+        write(repo / name, "# Doc\n")
+    git_add(repo, [".gitignore", "docs/plans/p.md"])
+    rig = discover(repo, workspace.home, DEFAULT_WINDOW)
+    assert _doc_names(rig) == ["docs/a.md"]
+    assert [(artifact.layer, artifact.load_class) for artifact in _docs(rig)] == [(Layer.REPO, LoadClass.ON_DEMAND)]
+
+
+def test_repo_docs_are_found_under_a_capitalized_docs_folder(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    write(repo / "Docs" / "b.md", "# Doc\n")
+    git_add(repo, ["Docs/b.md"])
+    assert _doc_names(discover(repo, workspace.home, DEFAULT_WINDOW)) == ["Docs/b.md"]

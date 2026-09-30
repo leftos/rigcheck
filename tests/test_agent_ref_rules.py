@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from rigcheck import engine
 from rigcheck.discover import discover
 from rigcheck.model import DEFAULT_WINDOW, Layer
@@ -398,3 +400,73 @@ def test_repo_skill_forks_to_a_plugin_agent_by_its_prefixed_name(workspace: Work
     _skill(workspace, "demo", "context: fork\nagent: tools:lint\n")
     _skill(workspace, "bare", "context: fork\nagent: lint\n")
     assert _plugin_found(workspace) == [(Layer.REPO, "skill-agent-missing", _missing_agent("lint"))]
+
+
+DISPATCH = "skill-dispatch-agent-missing"
+DISPATCH_HEAD = "---\nname: demo\ndescription: Demo.\n---\n\n"
+GHOST = 'dispatches agent "ghost", which names no built-in or custom subagent'
+
+
+def _dispatch_found(workspace: Workspace, skill: str) -> list[tuple[str, int | None]]:
+    repo = _repo(workspace)
+    write(repo / AGENTS / "helper.md", _file(VALID))
+    write(repo / SKILLS / "demo" / "SKILL.md", skill)
+    findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
+    return [(finding.message, finding.line) for finding in findings if finding.rule_id == DISPATCH]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Dispatch the `ghost` agent with the brief.",
+        "It dispatches `ghost`.",
+        "Then it dispatched a `ghost`, and waits.",
+        "Hand the diff to the `ghost` agent.",
+        "The `ghost` subagent reviews it.",
+        'Pass subagent_type: "ghost" to the tool.',
+        'Call it with `subagent_type: "ghost"`.',
+        'Call `Agent(subagent_type="ghost", prompt=brief)`.',
+        "Pass `subagent_type`: `ghost` to the tool.",
+    ],
+)
+def test_skill_dispatching_a_missing_agent_is_flagged(workspace: Workspace, body: str) -> None:
+    assert _dispatch_found(workspace, f"{DISPATCH_HEAD}{body}\n") == [(GHOST, 6)]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Run the `dispatch` skill.",
+        "Load the `plan-execution` skill.",
+        "`nextup` loads the profile.",
+        "Hand it to the profile's explore agent.",
+        "Dispatch the `claude-security:explore` agent.",
+        "Dispatch `general-purpose`.",
+        "Dispatch the `helper` agent.",
+        "Dispatch `ghost` with the brief.",
+        "The `ghost` agent-native design.",
+        "Pass `subagent_type=tools:worker`, `model=x` and no `ghost` id.",
+        "Each seat's subagent_type must declare `ghost` in its tools.",
+        "```text\nDispatch the `ghost` agent.\n```",
+    ],
+)
+def test_skill_prose_that_dispatches_no_missing_agent_is_quiet(workspace: Workspace, body: str) -> None:
+    assert _dispatch_found(workspace, f"{DISPATCH_HEAD}{body}\n") == []
+
+
+def test_skill_dispatch_in_frontmatter_is_not_read(workspace: Workspace) -> None:
+    assert _dispatch_found(workspace, "---\nname: demo\ndescription: Dispatch the `ghost` agent.\n---\n\nBody.\n") == []
+
+
+def test_skill_dispatching_a_miscased_agent_suggests_the_name(workspace: Workspace) -> None:
+    message = 'dispatches agent "Helper", which names no built-in or custom subagent (did you mean "helper"?)'
+    assert _dispatch_found(workspace, f"{DISPATCH_HEAD}Dispatch the `Helper` agent.\n") == [(message, 6)]
+
+
+def test_skill_dispatching_one_agent_twice_is_one_finding(workspace: Workspace) -> None:
+    assert _dispatch_found(workspace, f"{DISPATCH_HEAD}Use the `ghost` agent.\n\nAgain, the `ghost` agent.\n") == [(GHOST, 6)]
+
+
+def test_skill_dispatching_a_plugin_agent_by_bare_name_resolves(workspace: Workspace) -> None:
+    _plugin(workspace, {"agents/lint.md": _file("name: lint\ndescription: Lint.\n")})
+    assert _dispatch_found(workspace, f"{DISPATCH_HEAD}Dispatch the `lint` agent, then the `tools:lint` agent.\n") == []

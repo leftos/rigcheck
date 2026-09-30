@@ -15,7 +15,7 @@ uv run ruff check .
 uv run ty check
 uv run pytest
 uv run pytest tests/test_rule_catalog.py -k <rule-id>   # one rule's catalog and fixture tests
-uv run rigcheck check [PATH] [--format text|json] [--home DIR] [--window SIZE]
+uv run rigcheck check [PATH] [--format text|json] [--home DIR] [--window SIZE] [--only ID[,ID...]] [--fail-on error|warn|info]
 prek install                                            # hooks: ruff, ty, actionlint, zizmor
 ```
 

@@ -1,4 +1,4 @@
-"""Rules for what a subagent refers to: its tools and skills, its name against other agents, and a forked skill's agent."""
+"""Rules for what a subagent refers to: its tools and skills, its name against other agents, and the agents a skill forks to or dispatches."""
 
 import re
 from collections import defaultdict
@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from rigcheck.discover import path_key
-from rigcheck.model import Artifact, Finding, Kind, Layer, Rig, Severity
+from rigcheck.model import Artifact, Finding, Kind, Layer, LoadClass, Rig, Severity
 from rigcheck.parse.frontmatter import Frontmatter, as_bool
+from rigcheck.parse.markdown import prose_segments
 from rigcheck.rules import emit, rule
 from rigcheck.rules.agents import BUILTIN_AGENTS, BUILTIN_TOOLS, PERMISSION_ONLY_TOOLS, TOOL_ALIASES, as_text, loaded_agents, show
 from rigcheck.rules.components import case_match, components, load, plugin_name
@@ -326,3 +327,74 @@ def skill_agent_missing(rig: Rig) -> Iterator[Finding]:
         if agent is not None and agent not in known:
             message = f"agent {show(agent)} names no built-in or custom subagent{_hint(agent, tuple(sorted(known)))}"
             yield emit("skill-agent-missing", artifact, message, parsed.key_lines.get("agent", 1))
+
+
+_LINE_BREAK = re.compile(r"\r\n?|\n")
+_CODE_SPAN = re.compile(r"`([^`\n]+)`")
+_DISPATCH_NAME = re.compile(r"[A-Za-z][A-Za-z0-9-]*")
+_AGENT_AFTER = re.compile(r"\s+(?:sub)?agents?(?![\w-])", re.IGNORECASE)
+_DISPATCH_BEFORE = re.compile(r"\bdispatch(?:es|ed|ing)?\s+(?:(?:the|an?)\s+)?$", re.IGNORECASE)
+_CLAUSE_END = re.compile(r"\s*(?:[.,;:!?)]|$)")
+_SUBAGENT_TYPE = re.compile(r"""subagent_type`?\s*[:=]\s*([`"'])([A-Za-z][A-Za-z0-9-]*)\1""", re.IGNORECASE)
+"""``subagent_type`` assigned a quoted or backticked name with ``:`` or ``=``."""
+
+
+def _dispatches(before: str, after: str) -> bool:
+    """Say whether a code span between ``before`` and ``after`` names an agent: ```X` agent``, or ``dispatch `X``` ending a clause."""
+    if _AGENT_AFTER.match(after):
+        return True
+    return _DISPATCH_BEFORE.search(before) is not None and _CLAUSE_END.match(after) is not None
+
+
+def dispatched_agents(line: str) -> list[str]:
+    """Return the agent names one line of skill prose dispatches.
+
+    A name is a code span holding letters, digits and hyphens only (no ``:``, ``/`` or ``.``) that is followed by
+    ``agent`` or ``subagent``, or that follows ``dispatch`` (``dispatches``, ``dispatched``, ``dispatching``, with an
+    optional ``the``, ``a`` or ``an``) and ends a clause; or a quoted or backticked name assigned to ``subagent_type``
+    with ``:`` or ``=``. The words match in any case.
+
+    Args:
+        line: One source line of a skill's prose, code spans included.
+
+    Returns:
+        The names in the order the patterns find them; a name may repeat.
+    """
+    names = [match.group(2) for match in _SUBAGENT_TYPE.finditer(line)]
+    for span in _CODE_SPAN.finditer(line):
+        name = span.group(1)
+        if _DISPATCH_NAME.fullmatch(name) and _dispatches(line[: span.start()], line[span.end() :]):
+            names.append(name)
+    return names
+
+
+def _dispatched_in(rig: Rig, artifact: Artifact) -> dict[str, int]:
+    """Return each agent name a skill's prose dispatches with the first line naming it; code blocks and frontmatter are left out."""
+    text = rig.text(artifact.path)
+    lines = _LINE_BREAK.split(text)
+    found: dict[str, int] = {}
+    for number, _ in prose_segments(text, load(rig, artifact).body_line):
+        for name in dispatched_agents(lines[number - 1]) if number <= len(lines) else ():
+            found.setdefault(name, number)
+    return found
+
+
+@rule(
+    "skill-dispatch-agent-missing",
+    "core",
+    Severity.WARN,
+    "Create the agent (a file in .claude/agents/ or ~/.claude/agents/), or correct the name to a built-in or custom subagent that exists.",
+    ("rigcheck:agent-refs", "rigcheck:builtin-tables-probe"),
+)
+def skill_dispatch_agent_missing(rig: Rig) -> Iterator[Finding]:
+    """A skill's prose dispatches an agent by a name no built-in or custom subagent has."""
+    names, by_plugin = _agent_names(rig)
+    known = names.union(*by_plugin.values())
+    candidates = tuple(sorted(known))
+    for artifact in components(rig, (Kind.SKILL,)):
+        if artifact.load_class is LoadClass.NOT_LOADED:
+            continue
+        for name, line in _dispatched_in(rig, artifact).items():
+            if name not in known:
+                message = f"dispatches agent {show(name)}, which names no built-in or custom subagent{_hint(name, candidates)}"
+                yield emit("skill-dispatch-agent-missing", artifact, message, line)

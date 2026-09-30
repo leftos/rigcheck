@@ -329,3 +329,78 @@ def test_makefile_assignments_are_not_targets(line: str, expected: set[str]) -> 
 def test_makefile_names() -> None:
     text = "CC := gcc\nX = y\n.PHONY: all lint\nall lint: deps\n\techo\nclean::\n%.o: %.c\n$(OUT): x\nbuild/out.txt:\n\tx:\n"
     assert makefile_names(text) == {"all", "lint", "clean", "build/out.txt"}
+
+
+ALLOW = "<!-- rigcheck: allow reference-path-missing -->"
+GONE_IN_DOC = "src/gone.py does not exist (looked beside a.md and at the repo root)"
+
+
+def _doc_messages(workspace: Workspace, capsys: pytest.CaptureFixture[str], body: str) -> list[str]:
+    rig = workspace.rig()
+    write(rig / "src" / "keep.py", "x\n")
+    write(rig / "docs" / "a.md", body)
+    git_add(rig, ["docs/a.md", "src/keep.py"])
+    return _path_messages(capsys, rig, workspace.home)
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ("Read `src/gone.py`.\n", [GONE_IN_DOC]),
+        (f"{ALLOW}\nRead `src/gone.py`.\n", []),
+        (f"Read `src/gone.py`. {ALLOW}\n", []),
+        (f"{ALLOW}\n\nRead `src/gone.py`.\n", [GONE_IN_DOC]),
+        ("```bash\ncat src/gone.py\n```\n", []),
+    ],
+    ids=["plain", "marker-above", "marker-same-line", "marker-two-lines-above", "fenced"],
+)
+def test_path_rule_scans_docs_with_the_allow_marker(workspace: Workspace, capsys: pytest.CaptureFixture[str], body: str, expected: list[str]) -> None:
+    assert _doc_messages(workspace, capsys, body) == expected
+
+
+def test_path_rule_skips_single_segment_tokens_in_docs(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    assert _doc_messages(workspace, capsys, "See `Training/`, `TestData/` and `guide.md`.\n") == []
+
+
+def test_path_rule_accepts_a_parent_path_to_a_sibling_repo_from_a_doc(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    (workspace.rig("yaat-server") / "src").mkdir()
+    assert _doc_messages(workspace, capsys, "The server is in `../yaat-server`.\n") == []
+
+
+def test_path_rule_flags_a_parent_path_from_a_doc_when_only_the_leaf_is_gone(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    assert _doc_messages(workspace, capsys, "Read `../src/gone.py`.\n") == ["../src/gone.py does not exist (looked beside a.md and at the repo root)"]
+
+
+def test_path_rule_skips_code_shaped_tokens_in_docs(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    write(workspace.rig() / "src" / "File.cs", "x\n")
+    body = "See `src/File.cs:MethodName`, `src/File.cs:28-33` and `src/LmKitLicense.Initialize()`.\n"
+    assert _doc_messages(workspace, capsys, body) == []
+
+
+def test_path_rule_skips_plans_which_are_not_discovered(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rig = workspace.rig()
+    write(rig / "docs" / "plans" / "p.md", "Create `docs/plans/new-thing.md`.\n")
+    git_add(rig, ["docs/plans/p.md"])
+    assert _path_messages(capsys, rig, workspace.home) == []
+
+
+def test_path_rule_scans_a_skill_beside_its_folder(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rig = workspace.rig()
+    skill = rig / ".claude" / "skills" / "demo"
+    write(skill / "scripts" / "other.py", "x\n")
+    write(skill / "SKILL.md", "---\nname: demo\ndescription: Demo.\n---\n\nRun `scripts/run.py`.\n")
+    assert _path_messages(capsys, rig, workspace.home) == ["scripts/run.py does not exist (looked beside SKILL.md and at the repo root)"]
+
+
+def test_path_rule_scans_a_command(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rig = workspace.rig()
+    write(rig / "docs" / "other.md", "x\n")
+    write(rig / ".claude" / "commands" / "go.md", "Read `docs/gone.md`.\n")
+    assert _path_messages(capsys, rig, workspace.home) == ["docs/gone.md does not exist (looked beside go.md and at the repo root)"]
+
+
+def test_path_rule_keeps_an_agent_to_leaf_only_misses(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rig = workspace.rig()
+    write(rig / "docs" / "other.md", "x\n")
+    write(rig / ".claude" / "agents" / "scout.md", "---\nname: scout\ndescription: Scouts.\n---\n\nRead `docs/agents/explore.md`.\n")
+    assert _path_messages(capsys, rig, workspace.home) == []

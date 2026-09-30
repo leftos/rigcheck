@@ -13,6 +13,8 @@ rigcheck is a local validator for the instruction layer of coding agents (`CLAUD
 | Discover a new kind of file | `src/rigcheck/model.py` (`Kind`) → `src/rigcheck/discover.py` (`_CLAUDE_DIR_FILES`, `_PLUGIN_FILES`) → `tests/test_discover.py` | [`plans/v1.md`](plans/v1.md) |
 | Change how `@imports`, memory or the instruction chain are found | `src/rigcheck/discover.py` → `src/rigcheck/parse/markdown.py` → `src/rigcheck/rules/instructions.py`, `memory.py` | [`plans/v1.md`](plans/v1.md) |
 | Change stale-path or script-reference detection | `src/rigcheck/rules/references.py` → `src/rigcheck/parse/markdown.py` → `tests/test_references.py` | [`research/sota.md`](research/sota.md) |
+| Discover repo docs | `src/rigcheck/discover.py` (`DOC_ROOTS`, `_is_doc`, `_add_docs`) → `tests/test_discover.py` | [`plans/v1.md`](plans/v1.md) |
+| Change which agent names a skill's prose dispatches | `src/rigcheck/rules/agent_refs.py` (`dispatched_agents`) → `tests/test_agent_ref_rules.py` | [`research/builtin-tables-probe.md`](research/builtin-tables-probe.md) |
 | Change rule `paths` glob handling | `src/rigcheck/parse/globs.py` → `src/rigcheck/rules/rules_dir.py` → `tests/test_globs.py` | [`plans/MAIN.md`](plans/MAIN.md) |
 | Read hooks, settings or MCP config in a rule | `src/rigcheck/rules/config.py` (`hook_maps`, `handlers`, `mcp_servers`) → `src/rigcheck/parse/config.py` → the rule module | [`plans/MAIN.md`](plans/MAIN.md) |
 | Change the context budget | `src/rigcheck/report/budget.py` → `src/rigcheck/rules/budget.py` → `tests/test_budget.py`, `tests/test_budget_rules.py` | [`plans/v1.md`](plans/v1.md) |
@@ -30,7 +32,7 @@ One package, `src/rigcheck/`, built with `uv_build` (`pyproject.toml`); lint ban
 - **`rules`** (`src/rigcheck/rules/`): owns the checks, one module per area. `rules/__init__.py` holds `REGISTRY`, the `rule` decorator and the `emit` and `emit_setup` builders, and imports every area module so its rules register. `components.py` and `config.py` hold the helpers the area modules share. A rule takes a `Rig` and yields `Finding`s.
 - **`engine`** (`engine.py`): owns running the registered rules and ranking findings by severity, load class, layer, path and line. A rule that raises becomes one `internal-error` finding; the other rules still run.
 - **`report`** (`src/rigcheck/report/`): owns output: `terminal.py`, `json.py` (`SCHEMA_VERSION` 1) and `budget.py`, the context budget, which is a report and not a rule.
-- **`cli`** (`cli.py`): owns the `rigcheck check` command; it wires `discover`, `engine` and `report` and sets the exit status (0, 1 with an error finding, 2 on a usage error).
+- **`cli`** (`cli.py`): owns the `rigcheck check` command; it wires `discover`, `engine` and `report` and sets the exit status (0, 1 with a finding at or above `--fail-on`, 2 on a usage error).
 
 Rules modules `hooks.py`, `hook_commands.py`, `settings.py`, `permissions.py`, `mcp.py`, `secrets.py` and `duplication.py` are docstring-only stubs; the config helpers they will use are in `rules/config.py`. What is planned is in [`plans/MAIN.md`](plans/MAIN.md).
 

@@ -56,6 +56,7 @@ class Kind(Enum):
     MEMORY_INDEX = "memory-index"
     MEMORY_TOPIC = "memory-topic"
     PLUGIN_MANIFEST = "plugin-manifest"
+    DOC = "doc"
 
 
 class Severity(_Ranked):

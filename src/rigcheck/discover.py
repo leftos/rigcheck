@@ -6,6 +6,7 @@ import re
 from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,8 @@ CLAUDE_FAMILY = ("CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md")
 AGENTS_MD = "AGENTS.md"
 IGNORED_BY_CLAUDE = ("AGENTS.local.md", "AGENTS.override.md")
 SKIP_DIRS = frozenset({".git", "node_modules", ".venv", "bin", "obj", "dist", "build", ".tmp"})
+DOC_ROOTS = ("docs", "Docs")
+"""Top-level repo folders whose Markdown files are discovered as docs."""
 
 _CLAUDE_DIR_FILES = (
     ("skills/*/SKILL.md", Kind.SKILL, LoadClass.ON_INVOKE),
@@ -147,6 +150,15 @@ class _Builder:
     def add(self, artifact: Artifact) -> None:
         self.artifacts.setdefault(path_key(artifact.path), artifact)
 
+    @cached_property
+    def repo_files(self) -> list[str] | None:
+        """The repo's tracked and untracked-but-not-ignored files as repo-relative POSIX paths, listed once; None when git fails."""
+        output = git_output(self.repo_root, "ls-files", "-co", "--exclude-standard", "-z")
+        if output is None:
+            self.problems.append(f"git ls-files failed in {self.repo_root}")
+            return None
+        return [name for name in output.split("\0") if name]
+
     def read(self, path: Path) -> str | None:
         try:
             return path.read_bytes().decode("utf-8", errors="replace")
@@ -258,11 +270,7 @@ def _repo_claude_md(b: _Builder) -> Iterator[Path]:
     if not b.in_git:
         yield from _walk_claude_md(b)
         return
-    output = git_output(b.repo_root, "ls-files", "-co", "--exclude-standard", "-z")
-    if output is None:
-        b.problems.append(f"git ls-files failed in {b.repo_root}")
-        return
-    for name in output.split("\0"):
+    for name in b.repo_files or ():
         if name == "CLAUDE.md" or name.endswith("/CLAUDE.md"):
             yield b.repo_root / name
 
@@ -273,6 +281,45 @@ def _add_nested(b: _Builder) -> None:
     for path in _repo_claude_md(b):
         if _is_below(path.parent, b.target):
             b.add(Artifact(path, Kind.NESTED_INSTRUCTIONS, Layer.REPO, LoadClass.ON_DEMAND))
+
+
+def _is_doc(name: str) -> bool:
+    """Return True for a repo-relative POSIX path to a doc: a ``.md`` file under ``docs/`` or ``Docs/``.
+
+    Plans (``docs/plans/``) and anything in a folder named ``archive`` are left out: plans name files that do not exist yet.
+    """
+    parts = name.split("/")
+    if len(parts) < 2 or parts[0] not in DOC_ROOTS or not parts[-1].endswith(".md"):
+        return False
+    return parts[1] != "plans" and "archive" not in parts[1:-1]
+
+
+def _walk_docs(b: _Builder) -> Iterator[str]:
+    """Yield the repo-relative POSIX path of every file under the doc folders, for a folder outside git."""
+
+    def on_error(error: OSError) -> None:
+        b.problems.append(f"cannot list {error.filename}: {error.strerror or error}")
+
+    try:
+        present = {path.name for path in b.repo_root.iterdir()}
+    except OSError as exc:
+        on_error(exc)
+        return
+    for root in (name for name in DOC_ROOTS if name in present):
+        for directory, subdirs, files in os.walk(b.repo_root / root, onerror=on_error):
+            subdirs[:] = [name for name in subdirs if name not in SKIP_DIRS and not Path(directory, name).is_junction()]
+            yield from (Path(directory, name).relative_to(b.repo_root).as_posix() for name in files)
+
+
+def _add_docs(b: _Builder) -> None:
+    """Add the repo's docs, read on demand: git's file list inside a repository, a walk of the doc folders outside one."""
+    if b.home_target:
+        return
+    names = b.repo_files if b.in_git else list(_walk_docs(b))
+    for name in sorted(names or ()):
+        path = b.repo_root / name
+        if _is_doc(name) and is_file_like(path):
+            b.add(Artifact(path, Kind.DOC, Layer.REPO, LoadClass.ON_DEMAND))
 
 
 def _resolved_key(path: Path) -> str:
@@ -597,6 +644,7 @@ def discover(target: Path, home: Path, window: int) -> Rig:
     roots, shadowed = _add_chain(b)
     _follow_imports(b, roots, shadowed)
     _add_nested(b)
+    _add_docs(b)
     _add_claude_dirs(b)
     _add_plugins(b)
     _add_memory(b)

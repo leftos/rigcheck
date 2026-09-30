@@ -12,8 +12,18 @@ from rigcheck.model import Artifact, Finding, Kind, Layer, LoadClass, Rig, Sever
 from rigcheck.parse.markdown import Reference, find_references
 from rigcheck.rules import emit, rule
 
-_SCANNED_KINDS = (Kind.INSTRUCTIONS, Kind.NESTED_INSTRUCTIONS, Kind.RULE)
+_SCRIPT_KINDS = (Kind.INSTRUCTIONS, Kind.NESTED_INSTRUCTIONS, Kind.RULE)
+"""The kinds reference-script-missing scans."""
+_READ_KINDS = (Kind.DOC, Kind.SKILL, Kind.AGENT, Kind.COMMAND)
+"""The docs, skills, agents and commands agents read, whose paths reference-path-missing checks more leniently."""
+_PATH_KINDS = (*_SCRIPT_KINDS, *_READ_KINDS)
+"""The kinds reference-path-missing scans: the instruction files plus the docs, skills, agents and commands agents read."""
+_LINE_RANGE = re.compile(r":\d+-\d+$")
+_SYMBOL = re.compile(r"(\.[A-Za-z0-9]+):[A-Za-z_][A-Za-z0-9_.]*$")
 _SCANNED_LAYERS = (Layer.REPO, Layer.USER)
+ALLOW_PATH_MARKER = "<!-- rigcheck: allow reference-path-missing -->"
+"""A line holding this comment silences reference-path-missing on that line and the next."""
+_LINE_BREAK = re.compile(r"\r\n?|\n")
 _EVIDENCE = ("sota:#2 (A)", "sota:#23 (B)")
 _DRIVE = re.compile(r"^[A-Za-z]:")
 _PLACEHOLDER_CHARS = frozenset("*?[]{}<>$%`")
@@ -29,16 +39,25 @@ _LOCATION = re.compile(r":\d+(?::\d+)?$")
 _HOST = re.compile(r"^[a-z0-9-]+(\.[a-z0-9-]+)*\.(com|org|net|io|dev|ai|app|co|gg|me|sh|xyz)$", re.IGNORECASE)
 
 
-def _scanned(rig: Rig) -> list[Artifact]:
-    """Instruction and rule files a user or project maintains, including an AGENTS.md only Codex reads."""
+def _scanned(rig: Rig, kinds: tuple[Kind, ...]) -> list[Artifact]:
+    """Files of ``kinds`` a user or project maintains, including an AGENTS.md only Codex reads."""
     return [
         a
         for a in rig.artifacts
-        if a.kind in _SCANNED_KINDS
+        if a.kind in kinds
         and a.layer in _SCANNED_LAYERS
         and a.path.name not in IGNORED_BY_CLAUDE
         and (a.load_class is not LoadClass.NOT_LOADED or a.path.name == AGENTS_MD)
     ]
+
+
+def _allowed_lines(text: str) -> set[int]:
+    """Return the 1-based lines where reference-path-missing is silenced: each line holding the allow marker, and the line after it.
+
+    The marker is read from the file as written, because :func:`find_references` removes HTML comments first.
+    """
+    marked = {number for number, line in enumerate(_LINE_BREAK.split(text), start=1) if ALLOW_PATH_MARKER in line}
+    return marked | {number + 1 for number in marked}
 
 
 def _references(rig: Rig, artifact: Artifact) -> list[Reference]:
@@ -164,12 +183,39 @@ def _stale(paths: list[Path]) -> bool:
     return not any(exists(path) for path in paths) and any(exists(path.parent) for path in paths)
 
 
+def read_kind_token(token: str) -> str | None:
+    """Return the path a doc, skill, agent or command names with ``token``, or None when it names no checkable path.
+
+    A single segment (``Training/``, ``guide.md``) is context-relative, and a token holding ``(`` is code, so neither
+    is checked; a ``:<symbol>`` after a file extension (``File.cs:MethodName``) and a ``:<n>-<m>`` line range are dropped.
+
+    Args:
+        token: A path from :func:`path_candidate`.
+
+    Returns:
+        The path to check, or None.
+    """
+    if "(" in token or "/" not in token.rstrip("/"):
+        return None
+    return _SYMBOL.sub(r"\1", _LINE_RANGE.sub("", token))
+
+
+def _sibling_message(rig: Rig, artifact: Artifact, reference: Reference, token: str) -> str | None:
+    """Return the message for a ``../`` path in a doc, skill, agent or command that exists neither beside it nor from the repo root."""
+    beside = resolved(artifact.path.parent, token)
+    if exists(beside) or exists(resolved(rig.repo_root, token)) or not _stale([beside]):
+        return None
+    return f"{reference.raw} does not exist (looked beside {artifact.path.name} and at the repo root)"
+
+
 def _missing_path_message(rig: Rig, artifact: Artifact, reference: Reference, token: str) -> str | None:
     """Return the message for a path that names no file, or None when it exists or is not checkable."""
     if token.startswith("~/"):
         return f"{reference.raw} does not exist in the home folder" if _stale([resolved(rig.home, token[2:])]) else None
     if artifact.layer is not Layer.REPO:
         return None
+    if artifact.kind in _READ_KINDS and token.startswith("../"):
+        return _sibling_message(rig, artifact, reference, token)
     bases = path_bases(token, artifact.path.parent, rig.repo_root)
     if bases:
         return f"{reference.raw} does not exist (looked beside {artifact.path.name} and at the repo root)" if _stale(bases) else None
@@ -187,9 +233,12 @@ def _missing_path_message(rig: Rig, artifact: Artifact, reference: Reference, to
 )
 def reference_path_missing(rig: Rig) -> Iterator[Finding]:
     """A path in a code span or link names no file or folder."""
-    for artifact in _scanned(rig):
+    for artifact in _scanned(rig, _PATH_KINDS):
+        allowed = _allowed_lines(rig.text(artifact.path))
         for reference in _references(rig, artifact):
-            token = path_candidate(reference)
+            token = path_candidate(reference) if reference.line not in allowed else None
+            if token is not None and artifact.kind in _READ_KINDS:
+                token = read_kind_token(token)
             message = _missing_path_message(rig, artifact, reference, token) if token is not None else None
             if message is not None:
                 yield emit("reference-path-missing", artifact, message, reference.line)
@@ -409,7 +458,7 @@ def _missing_scripts(manifests: _Manifests, artifact: Artifact, reference: Refer
 def reference_script_missing(rig: Rig) -> Iterator[Finding]:
     """A ``npm run``, ``just`` or ``make`` command names a script, recipe or target that is not defined."""
     manifests = _Manifests(rig)
-    for artifact in _scanned(rig):
+    for artifact in _scanned(rig, _SCRIPT_KINDS):
         if artifact.layer is not Layer.REPO:
             continue
         for reference in _references(rig, artifact):
