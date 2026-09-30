@@ -21,6 +21,7 @@ Start here. The plan index is [plans/MAIN.md](plans/MAIN.md).
 - **Matcher group**: one entry under a hook event: an optional `matcher` (a tool name, a `|` list of exact names, or a regex) and the `hooks` list of handlers it runs.
 - **Handler**: one hook to run, with a `type` (`command`, `http`, `mcp_tool`, `prompt` or `agent`) and the fields that type needs.
 - **Shell form / exec form**: the two ways a command hook names what to run: shell form is one `command` string a shell parses; exec form is a program in `command` plus an `args` list, spawned without a shell.
+- **Vendored schema**: the SchemaStore Claude Code settings schema, copied into `src/rigcheck/data/` at a pinned commit so the settings check runs offline; `scripts/update_schema.py` refreshes it.
 - **Suppression**: a per-repo config entry that silences a rule, globally or for a path; every suppression must carry a reason.
 - **Feature marker**: `branch: feat/<name>` on a `docs/plans/MAIN.md` line; every item under it lands on the `feat/<name>` branch instead of `main` (user-level `nextup` §3, "Feature branches").
 - **Feature PR**: the draft pull request from a marker's `feat/<name>` into `main`, opened with the marker and merged with `--rebase` by `/ship` once every line under the marker is ticked.

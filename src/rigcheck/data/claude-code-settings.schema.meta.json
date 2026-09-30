@@ -1,0 +1,5 @@
+{
+  "source": "https://raw.githubusercontent.com/SchemaStore/schemastore/d2cbdcde9855c1bf9ea99c336163cc6c93753e39/src/schemas/json/claude-code-settings.json",
+  "commit": "d2cbdcde9855c1bf9ea99c336163cc6c93753e39",
+  "license": "Apache-2.0"
+}

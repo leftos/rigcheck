@@ -23,6 +23,29 @@ def test_load_invalid_json_names_line_and_column() -> None:
     assert doc.problem == "line 2 column 12: Expecting value"
 
 
+def test_load_reports_error_line() -> None:
+    assert config.load('{\n  "hooks": ,\n}').line == 2
+    assert config.load('{\n"a": 1\n\n"b": 2}').line == 4
+    assert config.load("{}").line is None
+    assert config.load("").line is None
+    assert config.load("[" * 100000).line is None
+
+
+@pytest.mark.parametrize(
+    ("text", "problem", "line"),
+    [
+        ('{"a": NaN}', "line 1 column 7: NaN is not valid JSON", 1),
+        ('{\n"a": [1, -Infinity]}', "line 2 column 10: -Infinity is not valid JSON", 2),
+        ('{"s": "NaN Infinity",\n"b": Infinity}', "line 2 column 6: Infinity is not valid JSON", 2),
+    ],
+)
+def test_load_rejects_nan_and_infinity(text: str, problem: str, line: int) -> None:
+    doc = config.load(text)
+    assert doc.data is None
+    assert doc.problem == problem
+    assert doc.line == line
+
+
 def test_load_empty_text_is_empty() -> None:
     doc = config.load("")
     assert doc.data is None
