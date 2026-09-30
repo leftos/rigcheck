@@ -11,5 +11,6 @@ One doc per rule area: what the area checks, its rule ids with severity and evid
 - [`output-styles.md`](output-styles.md): output-style keys and `keep-coding-instructions`.
 - [`hooks.md`](hooks.md): hook maps, hook structure, and the commands hooks run.
 - [`settings-and-permissions.md`](settings-and-permissions.md): config files that do not load, the settings schema, permission rules, and secret files without a Read deny.
+- [`secrets.md`](secrets.md): credential literals in instruction, memory, skill, command and agent files, and skills and commands that pipe a downloaded script into a shell.
 
 `internal-error` belongs to the engine: a rule that raises becomes one `internal-error` finding and the other rules still run.

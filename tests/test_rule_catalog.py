@@ -35,8 +35,15 @@ def _external_rule_link(rig: Path, *, scoped: bool) -> None:
     symlink_or_skip(link, os.fspath(target))
 
 
+def _append_secret(rig: Path) -> None:
+    """Append a pattern-valid key built from pieces, so no committed file holds one."""
+    claude = rig / "CLAUDE.md"
+    write(claude, claude.read_text(encoding="utf-8") + "ANTHROPIC_API_KEY=" + "sk-" + "ant-" + "api03-" + "a1B2c3D4" * 4 + "\n")
+
+
 RUNTIME_SETUP: dict[tuple[str, str], Callable[[Path], None]] = {
     ("instructions-too-large", "bad"): _pad_past_limit,
+    ("secret-literal", "bad"): _append_secret,
     ("unc-symlink", "bad"): _unc_link,
     ("rule-external-scoped", "bad"): lambda rig: _external_rule_link(rig, scoped=True),
     ("rule-external-scoped", "good"): lambda rig: _external_rule_link(rig, scoped=False),
