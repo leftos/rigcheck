@@ -1,7 +1,9 @@
 """The settings rules: config files that do not load, and settings values the schema rejects."""
 
 import json
+from importlib import resources
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -9,7 +11,8 @@ from rigcheck import engine
 from rigcheck.discover import discover
 from rigcheck.model import DEFAULT_WINDOW
 from rigcheck.rules import REGISTRY
-from support import Workspace, write
+from rigcheck.rules.settings import KEY_SCOPES, SCHEMA_FILE
+from support import Workspace, git_add, write
 
 BOOLEAN_KEYS = (
     "allowManagedHooksOnly",
@@ -177,3 +180,119 @@ def test_settings_local_checked(workspace: Workspace) -> None:
 def test_non_object_left_to_config_json_invalid(workspace: Workspace) -> None:
     assert _settings(workspace, "settings-schema-invalid", "[]\n") == []
     assert _run(workspace, "config-json-invalid") == [("settings.json holds an array where Claude Code expects an object", None)]
+
+
+def _schema_has(schema: dict[str, Any], path: tuple[str, ...]) -> bool:
+    """Walk ``path`` through the schema's ``properties``; a key under an object keyed by name walks its ``additionalProperties``."""
+    node = schema
+    for key in path:
+        properties = node.get("properties", {})
+        extra = node.get("additionalProperties")
+        if key in properties:
+            node = properties[key]
+        elif isinstance(extra, dict):
+            node = extra
+        else:
+            return False
+    return True
+
+
+def test_key_scope_table_keys_exist_in_schema() -> None:
+    schema = json.loads((resources.files("rigcheck") / "data" / SCHEMA_FILE).read_text(encoding="utf-8"))
+    missing = [path for path in KEY_SCOPES if not _schema_has(schema, path)]
+    assert any(len(path) > 2 for path in KEY_SCOPES)
+    assert missing == []
+
+
+def test_nested_managed_key_in_project(workspace: Workspace) -> None:
+    text = '{\n  "sandbox": {\n    "allowAppleEvents": true,\n    "network": {\n      "allowManagedDomainsOnly": true\n    }\n  }\n}\n'
+    expected = [
+        ('"sandbox.allowAppleEvents" has no effect in project settings; Claude Code reads it only in managed or user settings', 3),
+        ('"sandbox.network.allowManagedDomainsOnly" has no effect in project settings; Claude Code reads it only in managed settings', 5),
+    ]
+    assert sorted(_settings(workspace, "settings-key-managed-only", text)) == expected
+
+
+@pytest.mark.parametrize(
+    ("name", "text", "expected"),
+    [
+        (
+            "settings.json",
+            '{\n  "footerLinksRegexes": []\n}\n',
+            ('"footerLinksRegexes" has no effect in project settings; Claude Code reads it only in managed or user settings', 2),
+        ),
+        (
+            "settings.local.json",
+            '{\n  "pluginConfigs": {\n    "agents-md@builtin": {}\n  }\n}\n',
+            ('"pluginConfigs.agents-md@builtin" has no effect in local settings; Claude Code reads it only in managed or user settings', 3),
+        ),
+    ],
+    ids=["project", "local-nested"],
+)
+def test_user_scope_key_ignored_in_project(workspace: Workspace, name: str, text: str, expected: tuple[str, int]) -> None:
+    write(workspace.rig() / ".claude" / name, text)
+    assert _run(workspace, "settings-key-managed-only") == [expected]
+
+
+def test_user_scope_key_silent_in_user(workspace: Workspace) -> None:
+    text = '{\n  "claudeMd": "x",\n  "footerLinksRegexes": [],\n  "pluginConfigs": {"agents-md@builtin": {}}\n}\n'
+    findings = _settings(workspace, "settings-key-managed-only", text, in_home=True)
+    assert findings == [('"claudeMd" has no effect in user settings; Claude Code reads it only in managed settings', 2)]
+
+
+def test_managed_key_in_user_settings(workspace: Workspace) -> None:
+    findings = _settings(workspace, "settings-key-managed-only", '{"requiredMinimumVersion": "2.1.0"}\n', in_home=True)
+    assert findings == [('"requiredMinimumVersion" has no effect in user settings; Claude Code reads it only in managed settings', 1)]
+
+
+AUTOAPPROVE = "a committed settings file approves every server in .mcp.json, so a fresh clone runs them without asking"
+
+
+def test_autoapprove_untracked_is_silent(workspace: Workspace) -> None:
+    assert _settings(workspace, "settings-mcp-autoapprove-committed", '{\n  "enableAllProjectMcpServers": true\n}\n') == []
+    git_add(workspace.rig(), [".claude/settings.json"])
+    assert _run(workspace, "settings-mcp-autoapprove-committed") == [(AUTOAPPROVE, 2)]
+
+
+def test_enabled_mcpjson_servers_is_silent(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    write(repo / ".claude" / "settings.json", '{\n  "enabledMcpjsonServers": ["docs"],\n  "enableAllProjectMcpServers": "true"\n}\n')
+    write(repo / ".claude" / "settings.local.json", '{\n  "enableAllProjectMcpServers": true\n}\n')
+    git_add(repo, [".claude/settings.json", ".claude/settings.local.json"])
+    assert _run(workspace, "settings-mcp-autoapprove-committed") == []
+    write(repo / ".claude" / "settings.json", '{\n  "enabledMcpjsonServers": ["docs"],\n  "enableAllProjectMcpServers": true\n}\n')
+    assert _run(workspace, "settings-mcp-autoapprove-committed") == [(AUTOAPPROVE, 3)]
+
+
+RELATIVE = "is relative, but patterns match absolute paths, so it never matches"
+
+
+def test_exclude_double_star_alone_is_silent(workspace: Workspace) -> None:
+    text = '{\n  "claudeMdExcludes": ["**", "**\\\\docs\\\\CLAUDE.md", "**docs/CLAUDE.md"]\n}\n'
+    assert _settings(workspace, "claude-md-exclude-relative", text) == [(f'claudeMdExcludes pattern "**docs/CLAUDE.md" {RELATIVE}', 2)]
+
+
+def test_exclude_absolute_and_tilde_forms_silent(workspace: Workspace) -> None:
+    patterns = [
+        "/abs/CLAUDE.md",
+        "\\\\server\\CLAUDE.md",
+        "C:/x/CLAUDE.md",
+        "c:\\x\\CLAUDE.md",
+        "**/docs/CLAUDE.md",
+        "~/x/CLAUDE.md",
+        7,
+        "docs/CLAUDE.md",
+    ]
+    text = '{\n  "claudeMdExcludes": ' + json.dumps(patterns) + "\n}\n"
+    expected = [(f'claudeMdExcludes pattern "docs/CLAUDE.md" {RELATIVE}', 2)]
+    assert _settings(workspace, "claude-md-exclude-relative", text) == expected
+    write(workspace.home / ".claude" / "settings.json", '{"claudeMdExcludes": "docs/CLAUDE.md"}\n')
+    assert _run(workspace, "claude-md-exclude-relative") == expected
+
+
+def test_exclude_findings_name_three(workspace: Workspace) -> None:
+    patterns = ["a/CLAUDE.md", "**/ok/CLAUDE.md", "b/CLAUDE.md", "C:CLAUDE.md", "*/CLAUDE.md", "~user/CLAUDE.md"]
+    text = '{\n  "respectGitignore": true,\n  "claudeMdExcludes": ' + json.dumps(patterns) + "\n}\n"
+    findings = _settings(workspace, "claude-md-exclude-relative", text, in_home=True)
+    listed = '"a/CLAUDE.md", "b/CLAUDE.md", "C:CLAUDE.md" and 2 more'
+    assert findings == [(f"claudeMdExcludes patterns {listed} are relative, but patterns match absolute paths, so they never match", 3)]

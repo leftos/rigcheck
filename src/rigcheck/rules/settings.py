@@ -9,7 +9,7 @@ from importlib import resources
 from jsonschema import Draft7Validator
 from jsonschema.exceptions import ValidationError
 
-from rigcheck.model import Artifact, Finding, Kind, Rig, Severity
+from rigcheck.model import Artifact, Finding, Kind, Layer, Rig, Severity
 from rigcheck.parse import config
 from rigcheck.rules import emit, rule
 
@@ -308,3 +308,163 @@ def settings_schema_invalid(rig: Rig) -> Iterator[Finding]:
     """A settings file holds a value Claude Code's settings schema rejects."""
     for artifact, data in settings_docs(rig):
         yield from _schema_findings(rig, artifact, data)
+
+
+_SCOPE_ORDER = ("managed", "user", "project", "local")
+"""The settings scopes, in the order a message lists them."""
+
+_MANAGED = frozenset({"managed"})
+_MANAGED_OR_USER = frozenset({"managed", "user"})
+
+KEY_SCOPES: dict[tuple[str, ...], frozenset[str]] = {
+    ("allowAllClaudeAiMcps",): _MANAGED,
+    ("allowManagedHooksOnly",): _MANAGED,
+    ("allowManagedMcpServersOnly",): _MANAGED,
+    ("allowManagedPermissionRulesOnly",): _MANAGED,
+    ("allowedChannelPlugins",): _MANAGED,
+    ("blockedMarketplaces",): _MANAGED,
+    ("browserExternalPageTools",): _MANAGED,
+    ("channelsEnabled",): _MANAGED,
+    ("claudeMd",): _MANAGED,
+    ("disableBrowserExternalNavigation",): _MANAGED,
+    ("disableMobileSimulatorTools",): _MANAGED,
+    ("disableSideloadFlags",): _MANAGED,
+    ("forceLoginGatewayUrl",): _MANAGED,
+    ("forceRemoteSettingsRefresh",): _MANAGED,
+    ("managedMcpServers",): _MANAGED,
+    ("parentSettingsBehavior",): _MANAGED,
+    ("pluginSuggestionMarketplaces",): _MANAGED,
+    ("pluginTrustMessage",): _MANAGED,
+    ("policyHelper",): _MANAGED,
+    ("requireCoworkFullVmSandbox",): _MANAGED,
+    ("requiredMaximumVersion",): _MANAGED,
+    ("requiredMinimumVersion",): _MANAGED,
+    ("sshHostAllowlist",): _MANAGED,
+    ("strictKnownMarketplaces",): _MANAGED,
+    ("wslInheritsWindowsSettings",): _MANAGED,
+    ("sandbox", "filesystem", "allowManagedReadPathsOnly"): _MANAGED,
+    ("sandbox", "network", "allowManagedDomainsOnly"): _MANAGED,
+    ("sandbox", "allowAppleEvents"): _MANAGED_OR_USER,
+    ("askUserQuestionTimeout",): _MANAGED_OR_USER,
+    ("enableArtifact",): _MANAGED_OR_USER,
+    ("footerLinksRegexes",): _MANAGED_OR_USER,
+    ("pluginConfigs", "agents-md@builtin"): _MANAGED_OR_USER,
+    ("processWrapper",): _MANAGED_OR_USER,
+    ("vimInsertModeRemaps",): _MANAGED_OR_USER,
+    ("autoMemoryDirectory",): frozenset({"managed", "user", "local"}),
+}
+"""The settings scopes that honor each key path, for keys Claude Code ignores in some scopes.
+
+Taken from the vendored schema's descriptions ("Managed settings only", "Honored only at the managed
+policy tier", "Honored only from user, managed, or CLI settings", "ignored in project and local
+settings", "Ignored if set in checked-in project settings") and from the settings docs for
+``claudeMd`` and ``pluginConfigs`` of ``agents-md@builtin``.
+"""
+
+
+def _scope(artifact: Artifact) -> str | None:
+    """Return the settings scope of a settings file, or None for a file outside the repo and user layers."""
+    if artifact.layer not in (Layer.REPO, Layer.USER):
+        return None
+    if artifact.path.name == "settings.local.json":
+        return "local"
+    return "user" if artifact.layer is Layer.USER else "project"
+
+
+def _holds(data: Mapping[str, object], path: tuple[str, ...]) -> bool:
+    """Return True when ``data`` holds a key at ``path``, walking through objects only."""
+    node: object = data
+    for key in path:
+        if not isinstance(node, Mapping) or key not in node:
+            return False
+        node = node[key]
+    return True
+
+
+def _readers(scopes: frozenset[str]) -> str:
+    """Name the scopes that honor a key, as ``managed settings`` or ``managed or user settings``."""
+    names = [scope for scope in _SCOPE_ORDER if scope in scopes]
+    joined = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " or " + names[-1]
+    return f"{joined} settings"
+
+
+@rule(
+    "settings-key-managed-only",
+    "core",
+    Severity.WARN,
+    "Move the key to a settings file that honors it (see the message), or remove it.",
+    ("official:ST10",),
+)
+def settings_key_managed_only(rig: Rig) -> Iterator[Finding]:
+    """A settings file holds a key Claude Code reads only in other scopes, such as managed settings, so it has no effect."""
+    for artifact, data in settings_docs(rig):
+        scope = _scope(artifact)
+        if scope is None:
+            continue
+        for path, scopes in KEY_SCOPES.items():
+            if scope not in scopes and _holds(data, path):
+                message = f'"{".".join(path)}" has no effect in {scope} settings; Claude Code reads it only in {_readers(scopes)}'
+                yield emit("settings-key-managed-only", artifact, message, config.key_line(rig.text(artifact.path), path))
+
+
+@rule(
+    "settings-mcp-autoapprove-committed",
+    "core",
+    Severity.WARN,
+    "Move enableAllProjectMcpServers to .claude/settings.local.json, or approve servers per user.",
+    ("official:ST11",),
+)
+def settings_mcp_autoapprove_committed(rig: Rig) -> Iterator[Finding]:
+    """A project settings.json that git tracks sets enableAllProjectMcpServers, approving every .mcp.json server for every clone."""
+    message = "a committed settings file approves every server in .mcp.json, so a fresh clone runs them without asking"
+    for artifact, data in settings_docs(rig):
+        project = artifact.layer is Layer.REPO and artifact.path.name == "settings.json"
+        if project and data.get("enableAllProjectMcpServers") is True and rig.is_tracked(artifact.path):
+            line = config.key_line(rig.text(artifact.path), ("enableAllProjectMcpServers",))
+            yield emit("settings-mcp-autoapprove-committed", artifact, message, line)
+
+
+@rule(
+    "settings-local-tracked",
+    "core",
+    Severity.WARN,
+    "Untrack it (git rm --cached .claude/settings.local.json) and add it to .gitignore.",
+    ("official:ST12",),
+)
+def settings_local_tracked(rig: Rig) -> Iterator[Finding]:
+    """The repo's settings.local.json, meant for personal settings, is tracked by git."""
+    for artifact in rig.artifacts:
+        local = artifact.kind is Kind.SETTINGS and artifact.layer is Layer.REPO and artifact.path.name == "settings.local.json"
+        if local and rig.is_tracked(artifact.path):
+            yield emit("settings-local-tracked", artifact, ".claude/settings.local.json is personal but tracked by git", None)
+
+
+_ANCHORED = re.compile(r"[/\\]|[A-Za-z]:[/\\]|\*\*(?:[/\\]|\Z)|~/")
+"""The starts of a ``claudeMdExcludes`` pattern that can match an absolute path: a root, a drive, ``**`` alone or before a separator, or ``~/``."""
+
+
+def _relative_patterns(value: object) -> list[str]:
+    """Return the non-empty string patterns of a ``claudeMdExcludes`` list that are relative; a non-list holds none."""
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item and not _ANCHORED.match(item)]
+
+
+@rule(
+    "claude-md-exclude-relative",
+    "core",
+    Severity.WARN,
+    "Prefix the pattern with **/ (for example **/docs/CLAUDE.md) or write an absolute path.",
+    ("official:ST13",),
+)
+def claude_md_exclude_relative(rig: Rig) -> Iterator[Finding]:
+    """A claudeMdExcludes pattern is relative, but Claude Code matches the patterns against absolute paths, so it never matches."""
+    for artifact, data in settings_docs(rig):
+        relative = _relative_patterns(data.get("claudeMdExcludes"))
+        if not relative:
+            continue
+        if len(relative) == 1:
+            message = f'claudeMdExcludes pattern "{relative[0]}" is relative, but patterns match absolute paths, so it never matches'
+        else:
+            message = f"claudeMdExcludes patterns {_quoted(relative)} are relative, but patterns match absolute paths, so they never match"
+        yield emit("claude-md-exclude-relative", artifact, message, config.key_line(rig.text(artifact.path), ("claudeMdExcludes",)))
