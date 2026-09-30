@@ -31,12 +31,11 @@ The generic loop is the user-level `nextup` skill; this file supplies only what 
 
 - Explore: `Explore`. Second opinion on a rule's grammar or a discovery edge: `oracle`.
 - Reviewer: `code-review` for every item.
-- Gates, each wrapped as `cmd > .tmp/<name>.log 2>&1; rc=$?; tail -n 20 .tmp/<name>.log; (exit $rc)` from the worktree root:
-  - `uv run ruff format --check .`
-  - `uv run ruff check .`
-  - `uv run ty check`
-  - `nice -n 10 uv run pytest` (scoped with `-k <rule-id>` during a step, whole suite once at the end)
-  - Smoke after any discovery or rule change: `bash .claude/skills/rigcheck-nextup/smoke.sh > .tmp/smoke.log 2>&1; rc=$?; cat .tmp/smoke.log; (exit $rc)` from the worktree root. It checks every git repo under D:/ with a commit in the last 30 days (rigcheck excluded) plus `$HOME`, writes `.tmp/smoke/<name>.json`, prints counts only (user and plugin layers once, repo layer per repo), and fails on an `internal-error`. Compare against the same script's output on `main`; a new rule's hits on real repos are read before landing, and a jump in one rule is a false-positive suspect to bring to the user.
+- Gates, each run through the repo's gate (`tools/gate.ps1`, the user-level launcher: it lowers priority, takes a machine-wide slot, writes the whole output to the log and prints the tail, keeping the exit status) from the worktree root, as `pwsh tools/gate.ps1 -Log .tmp/<name>.log -TimeoutSeconds <n> -Slot light -- <command>`:
+  - `uv run ruff format --check .`, `uv run ruff check .`, `uv run ty check` (`-TimeoutSeconds 300`)
+  - `uv run pytest` (`-TimeoutSeconds 600`; scoped with `-k <rule-id>` during a step, whole suite once at the end)
+  - A `git commit` (its prek hooks run ruff and ty) as `pwsh tools/gate.ps1 -Log .tmp/commit.log -TimeoutSeconds 900 -Slot heavy -- git commit -F .tmp/msg.txt`
+  - Smoke after any discovery or rule change: `pwsh tools/gate.ps1 -Log .tmp/smoke.log -TimeoutSeconds 900 -Slot light -- bash .claude/skills/rigcheck-nextup/smoke.sh`, then read `.tmp/smoke.log` whole (it holds counts only). It checks every git repo under D:/ with a commit in the last 30 days (rigcheck excluded) plus `$HOME`, writes `.tmp/smoke/<name>.json`, prints counts only (user and plugin layers once, repo layer per repo), and fails on an `internal-error`. Compare against the same script's output on `main`; a new rule's hits on real repos are read before landing, and a jump in one rule is a false-positive suspect to bring to the user.
 - Parent-side gate: `git -C <wt> status --short` in the worktree and in the main checkout.
 
 ## Traps
