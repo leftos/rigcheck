@@ -17,6 +17,7 @@ rigcheck is a local validator for the instruction layer of coding agents (`CLAUD
 | Change which agent names a skill's prose dispatches | `src/rigcheck/rules/agent_refs.py` (`dispatched_agents`) → `tests/test_agent_ref_rules.py` | [`research/builtin-tables-probe.md`](research/builtin-tables-probe.md) |
 | Change rule `paths` glob handling | `src/rigcheck/parse/globs.py` → `src/rigcheck/rules/rules_dir.py` → `tests/test_globs.py` | [`plans/MAIN.md`](plans/MAIN.md) |
 | Read hooks, settings or MCP config in a rule | `src/rigcheck/rules/config.py` (`hook_maps`, `handlers`, `mcp_servers`) → `src/rigcheck/parse/config.py` → the rule module | [`plans/MAIN.md`](plans/MAIN.md) |
+| Add or change a hook structure rule (event, handler shape, matcher, `if`, `once`, timeout) | `src/rigcheck/rules/hooks.py` (`HOOK_EVENTS`, `TOOL_EVENTS`, `HANDLER_TYPES`) → `src/rigcheck/rules/config.py` (`hook_maps`, `handlers`) → `tests/test_hook_rules.py`, `tests/fixtures/hook-*/` (repo hooks in `.claude/settings.json`, plugin hooks in `home/.claude/plugins/cache/<plugin>/hooks/hooks.json`) | [`research/official.md`](research/official.md) HK1–HK13 |
 | Change the context budget | `src/rigcheck/report/budget.py` → `src/rigcheck/rules/budget.py` → `tests/test_budget.py`, `tests/test_budget_rules.py` | [`plans/v1.md`](plans/v1.md) |
 | Change a report or the JSON schema | `src/rigcheck/report/terminal.py` or `json.py` → `tests/test_engine_and_reports.py` → the usage section of `README.md` | [`README.md`](../README.md) |
 | Add a CLI flag or command | `src/rigcheck/cli.py` → `tests/test_cli.py` → the usage section of `README.md` | [`README.md`](../README.md) |
@@ -34,7 +35,7 @@ One package, `src/rigcheck/`, built with `uv_build` (`pyproject.toml`); lint ban
 - **`report`** (`src/rigcheck/report/`): owns output: `terminal.py`, `json.py` (`SCHEMA_VERSION` 1) and `budget.py`, the context budget, which is a report and not a rule.
 - **`cli`** (`cli.py`): owns the `rigcheck check` command; it wires `discover`, `engine` and `report` and sets the exit status (0, 1 with a finding at or above `--fail-on`, 2 on a usage error).
 
-Rules modules `hooks.py`, `hook_commands.py`, `settings.py`, `permissions.py`, `mcp.py`, `secrets.py` and `duplication.py` are docstring-only stubs; the config helpers they will use are in `rules/config.py`. What is planned is in [`plans/MAIN.md`](plans/MAIN.md).
+Rules modules `hook_commands.py`, `settings.py`, `permissions.py`, `mcp.py`, `secrets.py` and `duplication.py` are docstring-only stubs; the config helpers they will use are in `rules/config.py`. What is planned is in [`plans/MAIN.md`](plans/MAIN.md).
 
 ## Integration Footguns
 
