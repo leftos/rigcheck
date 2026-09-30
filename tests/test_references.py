@@ -1,7 +1,9 @@
+import json
 from pathlib import Path
 
 import pytest
 
+from rigcheck.cli import main
 from rigcheck.parse.markdown import Reference, find_references
 from rigcheck.rules.references import (
     invocations,
@@ -375,6 +377,25 @@ def test_path_rule_skips_code_shaped_tokens_in_docs(workspace: Workspace, capsys
     write(workspace.rig() / "src" / "File.cs", "x\n")
     body = "See `src/File.cs:MethodName`, `src/File.cs:28-33` and `src/LmKitLicense.Initialize()`.\n"
     assert _doc_messages(workspace, capsys, body) == []
+
+
+def _sibling_messages(capsys: pytest.CaptureFixture[str], rig: Path, home: Path, *flags: str) -> list[str]:
+    main(["check", str(rig), "--home", str(home), "--format", "json", *flags])
+    report = json.loads(capsys.readouterr().out)
+    return [finding["message"] for finding in report["findings"] if finding["rule"] == "reference-path-missing"]
+
+
+def test_path_rule_finds_a_doc_path_in_a_given_sibling_only(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rig = workspace.rig()
+    write(rig / "tools" / "keep.py", "x\n")
+    write(rig / "docs" / "a.md", "Run `tools/x.py`.\n")
+    write(rig / "CLAUDE.md", "Run `tools/x.py`.\n")
+    git_add(rig, ["CLAUDE.md", "docs/a.md", "tools/keep.py"])
+    sibling = write(workspace.rig("server") / "tools" / "x.py", "x\n").parent.parent
+    in_doc = "tools/x.py does not exist (looked beside a.md and at the repo root)"
+    in_claude = "tools/x.py does not exist (looked beside CLAUDE.md and at the repo root)"
+    assert sorted(_sibling_messages(capsys, rig, workspace.home)) == [in_claude, in_doc]
+    assert _sibling_messages(capsys, rig, workspace.home, "--sibling", str(sibling)) == [in_claude]
 
 
 def test_path_rule_skips_plans_which_are_not_discovered(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:

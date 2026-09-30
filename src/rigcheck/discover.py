@@ -624,7 +624,7 @@ def _claude_json_servers(home: Path, repo_root: Path | None) -> tuple[tuple[User
     return tuple(servers), ()
 
 
-def discover(target: Path, home: Path, window: int) -> Rig:
+def discover(target: Path, home: Path, window: int, *, siblings: tuple[Path, ...] = ()) -> Rig:
     """Discover the effective setup Claude Code loads for ``target``.
 
     Problems with unreadable or malformed inputs are collected in ``Rig.problems``; discovery never raises for them.
@@ -635,6 +635,7 @@ def discover(target: Path, home: Path, window: int) -> Rig:
         target: The directory Claude Code would start in.
         home: The home directory holding ``.claude``.
         window: The model's context window, in tokens, carried on the rig for the rules that measure against it.
+        siblings: Folders given with ``--sibling``, carried on the rig for reference-path-missing; never scanned.
 
     Returns:
         The rig: every artifact with its layer and load class.
@@ -658,4 +659,5 @@ def discover(target: Path, home: Path, window: int) -> Rig:
         problems=tuple(b.problems),
         user_mcp_servers=servers,
         window=window,
+        siblings=siblings,
     )

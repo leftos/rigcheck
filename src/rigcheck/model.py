@@ -180,6 +180,7 @@ class Rig:
         user_mcp_servers: The MCP servers ``~/.claude.json`` declares for this target, user scope first, then local scope.
             The file itself is never an artifact.
         window: The model's context window, in tokens.
+        siblings: Folders given with ``--sibling`` where a doc, skill, agent or command path may also exist.
     """
 
     target: Path
@@ -189,6 +190,7 @@ class Rig:
     problems: tuple[str, ...]
     user_mcp_servers: tuple[UserMcpServer, ...]
     window: int
+    siblings: tuple[Path, ...] = ()
     _texts: dict[Path, str] = field(default_factory=dict, init=False, repr=False, compare=False)
 
     def text(self, path: Path) -> str:

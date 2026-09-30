@@ -90,3 +90,11 @@ def test_fail_on_rejects_an_unknown_severity(workspace: Workspace) -> None:
     with pytest.raises(SystemExit) as exit_info:
         _check(workspace, workspace.rig(), "--fail-on", "warning")
     assert exit_info.value.code == 2
+
+
+def test_sibling_that_is_not_a_directory_is_a_usage_error(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    missing = workspace.home / "work" / "no-such-sibling"
+    with pytest.raises(SystemExit) as exit_info:
+        _check(workspace, workspace.rig(), "--sibling", str(workspace.rig("server")), "--sibling", str(missing))
+    assert exit_info.value.code == 2
+    assert f"--sibling is not a directory: {missing}" in capsys.readouterr().err

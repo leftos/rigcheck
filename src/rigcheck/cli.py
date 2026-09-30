@@ -32,6 +32,14 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument(
         "--window", type=parse_window, default=DEFAULT_WINDOW, metavar="SIZE", help="model context window in tokens, like 200k or 1m (default: 200k)"
     )
+    check.add_argument(
+        "--sibling",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="a sibling checkout where a path named in a doc, skill, agent or command may exist instead (repeatable)",
+    )
     check.add_argument("--only", type=parse_only, default=None, metavar="ID[,ID...]", help="report only the findings of these rule ids")
     check.add_argument(
         "--fail-on",
@@ -87,7 +95,11 @@ def _check(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     if not target.is_dir():
         parser.error(f"not a directory: {target}")
     home = (args.home or Path.home()).resolve()
-    rig = discover(target, home, args.window)
+    siblings = tuple(sibling.resolve() for sibling in args.sibling)
+    for sibling in siblings:
+        if not sibling.is_dir():
+            parser.error(f"--sibling is not a directory: {sibling}")
+    rig = discover(target, home, args.window, siblings=siblings)
     findings = engine.run(rig, REGISTRY.values())
     if args.only is not None:
         # A selected rule that raised is reported as internal-error, so that id is always kept.

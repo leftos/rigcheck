@@ -208,6 +208,14 @@ def _sibling_message(rig: Rig, artifact: Artifact, reference: Reference, token: 
     return f"{reference.raw} does not exist (looked beside {artifact.path.name} and at the repo root)"
 
 
+def _path_message(rig: Rig, artifact: Artifact, reference: Reference, token: str) -> str | None:
+    """Return the message for a path that names no file; a doc, skill, agent or command path found in a ``--sibling`` folder is fine."""
+    message = _missing_path_message(rig, artifact, reference, token)
+    if message is not None and artifact.kind in _READ_KINDS and any(exists(resolved(sibling, token)) for sibling in rig.siblings):
+        return None
+    return message
+
+
 def _missing_path_message(rig: Rig, artifact: Artifact, reference: Reference, token: str) -> str | None:
     """Return the message for a path that names no file, or None when it exists or is not checkable."""
     if token.startswith("~/"):
@@ -239,7 +247,7 @@ def reference_path_missing(rig: Rig) -> Iterator[Finding]:
             token = path_candidate(reference) if reference.line not in allowed else None
             if token is not None and artifact.kind in _READ_KINDS:
                 token = read_kind_token(token)
-            message = _missing_path_message(rig, artifact, reference, token) if token is not None else None
+            message = _path_message(rig, artifact, reference, token) if token is not None else None
             if message is not None:
                 yield emit("reference-path-missing", artifact, message, reference.line)
 
