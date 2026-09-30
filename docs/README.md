@@ -2,6 +2,8 @@
 
 Start here. The plan index is [plans/MAIN.md](plans/MAIN.md).
 
+- [`ARCHITECTURE.md`](ARCHITECTURE.md): the architecture entry point: Task Index, layers, integration footguns, test locations and the deep docs.
+
 ## Glossary
 
 - **Rig**: the whole instruction setup an agent runs on in one place: repo files, user-level files, plugins, hooks and memory.
