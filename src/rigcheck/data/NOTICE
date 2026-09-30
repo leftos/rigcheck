@@ -1,0 +1,4 @@
+claude-code-settings.schema.json is the Claude Code settings schema from SchemaStore
+(https://github.com/SchemaStore/schemastore), licensed under the Apache License 2.0
+(https://www.apache.org/licenses/LICENSE-2.0). It is vendored unmodified at the commit named in
+claude-code-settings.schema.meta.json; scripts/update_schema.py refreshes it.

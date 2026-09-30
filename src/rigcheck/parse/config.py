@@ -1,6 +1,7 @@
 """JSON config files: loading them, and locating a key's line."""
 
 import json
+import re
 from dataclasses import dataclass
 
 BOM = chr(0xFEFF)
@@ -18,6 +19,9 @@ _CLOSE = "}]"
 _BRACKETS = _OPEN + _CLOSE
 """Every character that opens or closes a container."""
 
+_CONSTANT_OR_STRING = re.compile(r'"(?:[^"\\]|\\.)*"|-Infinity|Infinity|NaN', re.DOTALL)
+"""A JSON string, matched whole so a constant's name inside one is skipped, or a bare non-JSON constant."""
+
 
 @dataclass(frozen=True)
 class JsonDoc:
@@ -26,10 +30,13 @@ class JsonDoc:
     Attributes:
         data: The parsed value: an object, array, string, number, boolean or null; None when the text does not load.
         problem: Why the text is not JSON, or None when it loaded.
+        line: The 1-based line a syntax error stopped the parser at, or None when the text loaded or
+            failed without naming a line.
     """
 
     data: object | None
     problem: str | None
+    line: int | None
 
 
 def load(text: str) -> JsonDoc:
@@ -42,17 +49,45 @@ def load(text: str) -> JsonDoc:
         The parsed document. A text that is empty or only whitespace does not load, a syntax error's
         problem names the line and column the parser stopped at, and a document the parser refuses
         rather than reports on (a number too long to convert, nesting too deep to walk) is named by
-        the error it raised, which never carries any of the file's content.
+        the error it raised, which never carries any of the file's content. ``NaN``, ``Infinity``
+        and ``-Infinity``, which Python's parser accepts and JSON does not, are a problem naming the
+        token and where it stands.
     """
     body = text.removeprefix(BOM)
     if not body.strip():
-        return JsonDoc(data=None, problem="the file is empty")
+        return JsonDoc(data=None, problem="the file is empty", line=None)
     try:
-        return JsonDoc(data=json.loads(body), problem=None)
+        return JsonDoc(data=json.loads(body, parse_constant=_reject_constant), problem=None, line=None)
+    except _ConstantError as exc:
+        return _constant_problem(body, exc.token)
     except json.JSONDecodeError as exc:
-        return JsonDoc(data=None, problem=f"line {exc.lineno} column {exc.colno}: {exc.msg}")
+        return JsonDoc(data=None, problem=f"line {exc.lineno} column {exc.colno}: {exc.msg}", line=exc.lineno)
     except (ValueError, RecursionError) as exc:
-        return JsonDoc(data=None, problem=f"not loadable JSON: {type(exc).__name__}")
+        return JsonDoc(data=None, problem=f"not loadable JSON: {type(exc).__name__}", line=None)
+
+
+class _ConstantError(ValueError):
+    """Raised by the parser for a ``NaN``, ``Infinity`` or ``-Infinity`` token, which JSON does not allow."""
+
+    def __init__(self, token: str) -> None:
+        super().__init__(token)
+        self.token = token
+
+
+def _reject_constant(token: str) -> object:
+    """Refuse the non-JSON constant ``token`` the parser met."""
+    raise _ConstantError(token)
+
+
+def _constant_problem(body: str, token: str) -> JsonDoc:
+    """Return the problem for a non-JSON constant, placed at its first occurrence outside a string when one is found."""
+    for match in _CONSTANT_OR_STRING.finditer(body):
+        if match.group() == token:
+            start = match.start()
+            line = body.count("\n", 0, start) + 1
+            column = start - body.rfind("\n", 0, start)
+            return JsonDoc(data=None, problem=f"line {line} column {column}: {token} is not valid JSON", line=line)
+    return JsonDoc(data=None, problem=f"{token} is not valid JSON", line=None)
 
 
 def key_line(text: str, path: tuple[str, ...]) -> int | None:
