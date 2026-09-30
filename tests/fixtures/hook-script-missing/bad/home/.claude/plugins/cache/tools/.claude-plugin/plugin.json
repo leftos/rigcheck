@@ -1,0 +1,5 @@
+{
+  "name": "tools",
+  "description": "Fixture plugin whose hook names a script it does not ship.",
+  "version": "1.0.0"
+}

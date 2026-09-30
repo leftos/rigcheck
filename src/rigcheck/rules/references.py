@@ -10,6 +10,7 @@ from urllib.parse import unquote
 from rigcheck.discover import AGENTS_MD, IGNORED_BY_CLAUDE, SKIP_DIRS, path_key
 from rigcheck.model import Artifact, Finding, Kind, Layer, LoadClass, Rig, Severity
 from rigcheck.parse.markdown import Reference, find_references
+from rigcheck.parse.shell import segments
 from rigcheck.rules import emit, rule
 
 _SCRIPT_KINDS = (Kind.INSTRUCTIONS, Kind.NESTED_INSTRUCTIONS, Kind.RULE)
@@ -252,8 +253,6 @@ def reference_path_missing(rig: Rig) -> Iterator[Finding]:
                 yield emit("reference-path-missing", artifact, message, reference.line)
 
 
-_SHELL_PARTS = re.compile(r"""'[^']*'|"[^"]*"|&&|\|\||[;|]|[^'"&|;]+|.""")
-_SEPARATORS = ("&&", "||", ";", "|")
 _RUNNERS = {("npm", "run"), ("npm", "run-script"), ("pnpm", "run")}
 _REDIRECTING_FLAGS = (
     "-C",
@@ -282,24 +281,6 @@ _MANIFESTS = {
     "make": ("Makefile", "makefile", "GNUmakefile"),
 }
 _KINDS = {"npm": "script", "just": "recipe", "make": "target"}
-
-
-def segments(raw: str) -> list[str]:
-    """Split shell text on ``&&``, ``||``, ``;`` and ``|`` outside single and double quotes.
-
-    Args:
-        raw: One line of shell text.
-
-    Returns:
-        The text between separators, in order; empty strings where separators meet.
-    """
-    found = [""]
-    for part in _SHELL_PARTS.findall(raw):
-        if part in _SEPARATORS:
-            found.append("")
-        else:
-            found[-1] += part
-    return found
 
 
 def _redirected(tool: str, words: list[str]) -> bool:

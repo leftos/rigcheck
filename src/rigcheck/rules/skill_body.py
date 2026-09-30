@@ -1,16 +1,16 @@
 """Rules for the body of skill and command files: injected shell commands, ``$N`` in prose and unused arguments."""
 
 import re
-import shlex
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 from rigcheck.model import Artifact, Finding, Kind, Rig, Severity
+from rigcheck.parse import shell
 from rigcheck.parse.markdown import Injection, find_injections, prose_segments
 from rigcheck.rules import emit, rule
 from rigcheck.rules.components import components, load
-from rigcheck.rules.references import exists, inside, resolved, segments
+from rigcheck.rules.references import exists, inside, resolved
 from rigcheck.rules.skills import LISTED_KINDS
 
 
@@ -36,34 +36,7 @@ def skill_injection_literal(rig: Rig) -> Iterator[Finding]:
                 yield emit("skill-injection-literal", artifact, message, injection.line)
 
 
-_ANCHORED = ("$", "~", "/", "%", "\\\\")
-"""Word prefixes that make a path resolve the same way from any working directory.
-
-Any variable or command substitution (``$VAR``, ``${VAR}``, ``$(...)``), the home folder, the root, a
-Windows ``%VAR%`` and a UNC path.
-"""
-
-_DRIVE = re.compile(r"^[A-Za-z]:")
-_CWD_RELATIVE = ("./", "../", ".\\", "..\\")
 _FILE_EXTENSION = re.compile(r"\.[A-Za-z0-9]+$")
-_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-"""An environment assignment before a command, such as ``FOO=1``."""
-
-
-def _words(segment: str) -> list[str]:
-    """Split one shell command into words, quotes removed and backslashes kept; on unbalanced quotes, split on whitespace."""
-    lexer = shlex.shlex(segment, posix=True)
-    lexer.whitespace_split = True
-    lexer.commenters = ""
-    lexer.escape = ""
-    try:
-        return list(lexer)
-    except ValueError:
-        return [word.strip("\"'") for word in segment.split()]
-
-
-def _anchored(word: str) -> bool:
-    return word.startswith(_ANCHORED) or _DRIVE.match(word) is not None or "://" in word
 
 
 def _in_skill(word: str, root: Path) -> bool:
@@ -76,20 +49,18 @@ def _in_skill(word: str, root: Path) -> bool:
 
 def _cwd_relative(word: str, first: bool, root: Path | None) -> bool:
     """True when ``word`` is a path that resolves against the session's current directory."""
-    if _anchored(word):
-        return False
-    if word.startswith(_CWD_RELATIVE) or (first and ("/" in word or "\\" in word)):
+    if shell.cwd_relative(word, first):
         return True
-    return root is not None and _in_skill(word, root)
+    return root is not None and not shell.anchored(word) and _in_skill(word, root)
 
 
 def _segment_word(segment: str, root: Path | None) -> str | None:
     """Return the first current-directory-relative path in one command; leading ``NAME=value`` words are assignments."""
-    words = _words(segment)
+    words = shell.words(segment)
     start = 0
-    while start < len(words) and (assignment := _ASSIGNMENT.match(words[start])) is not None:
+    while start < len(words) and (assignment := shell.ASSIGNMENT.match(words[start])) is not None:
         value = words[start][assignment.end() :]
-        if value.startswith(_CWD_RELATIVE):
+        if value.startswith(shell.CWD_RELATIVE):
             return value
         start += 1
     for index, word in enumerate(words[start:]):
@@ -98,22 +69,9 @@ def _segment_word(segment: str, root: Path | None) -> str | None:
     return None
 
 
-def _uncommented(line: str) -> str:
-    """Cut ``line`` at the first ``#`` outside quotes that starts a word, where a shell comment begins."""
-    quote = ""
-    for index, char in enumerate(line):
-        if quote:
-            quote = "" if char == quote else quote
-        elif char in "\"'":
-            quote = char
-        elif char == "#" and (index == 0 or line[index - 1].isspace()):
-            return line[:index]
-    return line
-
-
 def _relative_word(line: str, root: Path | None) -> str | None:
     """Return the first word of one command line that is a current-directory-relative path."""
-    for segment in segments(_uncommented(line)):
+    for segment in shell.segments(shell.uncommented(line)):
         word = _segment_word(segment, root)
         if word is not None:
             return word
