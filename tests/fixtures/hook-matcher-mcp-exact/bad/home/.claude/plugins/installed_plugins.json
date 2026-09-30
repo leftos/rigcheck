@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "plugins": {
+    "tools@market": [
+      {
+        "scope": "user",
+        "installPath": "{HOME}/.claude/plugins/cache/tools"
+      }
+    ]
+  }
+}

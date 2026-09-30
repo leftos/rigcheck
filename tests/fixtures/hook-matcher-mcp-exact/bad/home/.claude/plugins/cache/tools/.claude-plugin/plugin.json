@@ -1,0 +1,5 @@
+{
+  "name": "tools",
+  "description": "Fixture plugin whose hook matcher names an MCP server without __.*.",
+  "version": "1.0.0"
+}
