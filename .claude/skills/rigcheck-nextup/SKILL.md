@@ -11,7 +11,7 @@ The generic loop is the user-level `nextup` skill; this file supplies only what 
 
 - Index: `docs/plans/MAIN.md`, section `## Current focus`, then `## Next up`, then `## Backlog`. Each milestone line points into `docs/plans/v1.md`: its rule catalog names every rule by the research id it cites (`CM2`, `SK4`, `HK3`, `sota:#2`), and `docs/research/official.md` / `sota.md` hold each id's quote, check type and suggested severity. Read the id's entry there before writing a brief; never cite a rule from memory.
 - A milestone line that is too big for one brief (about 100 implementer calls: up to four steps or six files) is a *design* item: split it into lettered sub-items (`M3a`, `M3b`) in MAIN.md, grouped by rule module, and land the split before dispatching.
-- Siblings: none.
+- siblings: none
 - Pre-loop hooks: none.
 - Finished-item convention: **tick the line** (`- [x]`), never delete it. When every milestone of `v1.md` is ticked, `git mv` it to `docs/plans/archive/` in the landing commit.
 - Tracker: `gh issue list --repo leftos/rigcheck --state open --json number,title`. No triage skill; place issues by the step-0 rule.
