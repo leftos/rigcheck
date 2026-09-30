@@ -1,6 +1,6 @@
 # Settings and permissions
 
-This area checks that JSON config files load, that settings files match Claude Code's settings schema, and that permission rules do what they appear to. JSON loading and key lines are `src/rigcheck/parse/config.py` (described in [`discovery.md`](discovery.md)); the load and schema rules are `src/rigcheck/rules/settings.py`, against the vendored schema in `src/rigcheck/data/`; permission-rule parsing and Bash pattern matching are `src/rigcheck/parse/permissions.py`, and the permission rules are `src/rigcheck/rules/permissions.py`. The grammar comes from [`../research/permissions-grammar.md`](../research/permissions-grammar.md). The terms vendored schema, permission rule, specifier, settings scope and shadowed are in the glossary in [`../README.md`](../README.md).
+This area checks that JSON config files load, that settings files match Claude Code's settings schema, and that permission rules do what they appear to. JSON loading and key lines are `src/rigcheck/parse/config.py` (described in [`discovery.md`](discovery.md)); the load, schema and settings scope rules are `src/rigcheck/rules/settings.py`, the schema checked against the vendored schema in `src/rigcheck/data/`; permission-rule parsing and Bash pattern matching are `src/rigcheck/parse/permissions.py`, and the permission rules are `src/rigcheck/rules/permissions.py`. The grammar comes from [`../research/permissions-grammar.md`](../research/permissions-grammar.md). The terms vendored schema, permission rule, specifier, settings scope, managed settings and shadowed are in the glossary in [`../README.md`](../README.md).
 
 ## Rules
 
@@ -13,6 +13,10 @@ This area checks that JSON config files load, that settings files match Claude C
 | `secret-file-not-denied` | warn | `official:ST5` |
 | `permission-bash-wildcard` | warn | `official:ST6` |
 | `permission-bash-colon-star` | error | `official:ST6` |
+| `settings-key-managed-only` | warn | `official:ST10` |
+| `settings-mcp-autoapprove-committed` | warn | `official:ST11` |
+| `settings-local-tracked` | warn | `official:ST12` |
+| `claude-md-exclude-relative` | warn | `official:ST13` |
 
 ## Config files that do not load
 
@@ -29,6 +33,16 @@ This area checks that JSON config files load, that settings files match Claude C
 - Each message is worded from the failing schema keyword and the schema's own values, never echoing a value from the file, because rigcheck never prints file contents from the real home in a report. Unknown keys and keys that break `propertyNames` are named, as key names, up to three per finding.
 - A finding sits on the line of the first key the reason names, else the value's own key, else the nearest enclosing key.
 - A settings file with no `$schema` gets no finding: that is an editor convenience, and nothing Claude Code loads changes.
+
+## Settings scope
+
+- These rules run on the repo and user settings files. Managed settings are out of scope: rigcheck does not read them, so a key there is never checked.
+- `settings-key-managed-only` checks each loaded settings file against `KEY_SCOPES`, which maps a key path to the scopes that honor it. The table is built from the vendored schema's descriptions: a key described as honored or read only in managed settings maps to `managed`; a key ignored in project and local settings maps to `managed` or `user`; `autoMemoryDirectory`, ignored in checked-in project settings, maps to `managed`, `user` or `local`. `claudeMd` (managed) and `pluginConfigs` of `agents-md@builtin` (managed or user) come from official.md ST10. A key in a file whose scope the table does not list gets one finding on the key's line, naming the scopes that do read it.
+- Keys the schema tags "(Managed settings)" without "only" (`sshConfigs`, `disableAgentView`, `enforceAvailableModels`, `strictPluginOnlyCustomization`) and keys that apply to all scopes (`allowedMcpServers`, `deniedMcpServers`) are not in the table, because nothing says Claude Code ignores them elsewhere.
+- Nested keys are rows of their own (`sandbox.network.allowManagedDomainsOnly`, `sandbox.filesystem.allowManagedReadPathsOnly`, `sandbox.allowAppleEvents`); a key path is walked through objects only. A test pins every row's path to the vendored schema, so a key the schema renames or drops fails the suite.
+- `settings-mcp-autoapprove-committed` fires only on `enableAllProjectMcpServers: true` (the boolean) in the repo's `.claude/settings.json` when git tracks it, because a cloned repository cannot approve its own `.mcp.json` servers and a committed file does exactly that for every clone. `enabledMcpjsonServers` is not flagged: it approves named servers, which a team may commit on purpose. The same key in `settings.local.json` is silent.
+- `settings-local-tracked` fires when git tracks the `settings.local.json` in the repo's `.claude` folder, whether or not the file loads, because the file holds personal settings. It has no line.
+- `claude-md-exclude-relative` reads each settings file's `claudeMdExcludes` list; Claude Code matches the patterns against absolute paths (official.md ST13), so a relative pattern never matches. A pattern counts as anchored when it starts with `/` or `\`, a drive letter followed by `/` or `\`, `**/` or `**\`, or `~/`, or is `**` alone. `~/` is not flagged, because nothing says Claude Code does not expand it. Non-string and empty items, and a value that is not a list, are skipped. One finding per file on the `claudeMdExcludes` key names up to three relative patterns and counts the rest.
 
 ## Permission rules
 

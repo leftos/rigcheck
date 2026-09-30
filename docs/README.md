@@ -25,6 +25,7 @@ Start here. The plan index is [plans/MAIN.md](plans/MAIN.md).
 - **Permission rule**: one string in a settings file's `permissions.allow`, `ask` or `deny` list: a tool name, optionally with a specifier in parentheses (`Bash(git *)`, `Read(./.env)`).
 - **Specifier**: the part of a permission rule inside the parentheses: a command pattern for Bash, a path pattern for Read and Edit.
 - **Settings scope**: which settings file a rule or key comes from: `user` (`~/.claude/settings.json`), `project` (the repo's `.claude/settings.json`) or `local` (`settings.local.json` in the repo's `.claude` folder); Claude Code combines the permission lists of every scope.
+- **Managed settings**: the policy tier of settings Claude Code reads from the system managed-settings file or MDM; some keys are honored only there. rigcheck does not read it.
 - **Shadowed**: an allow rule that a deny or ask rule in any scope already matches, so it never applies (deny, then ask, then allow; the first match wins).
 - **Setup finding**: a finding about the whole setup rather than one file (no path or layer, loads every turn), printed first under a `setup` heading with the location `(setup)`.
 - **Script word**: the word of a hook command that names the script it runs: the command word, or the first operand after an interpreter such as `bash` or `python`.
