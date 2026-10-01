@@ -1,2 +1,7 @@
+# LF everywhere; Windows batch files keep CRLF.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
 # Fixture bytes are test input: line endings are checked out exactly as committed.
 tests/fixtures/** -text
