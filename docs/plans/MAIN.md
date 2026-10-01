@@ -31,6 +31,8 @@ Rulings (user): MC7 (server instructions over 2,048 characters) needs the server
 - [ ] `secret-literal` misses an encrypted PEM private key: its body starts 3 or more lines after the header (`Proc-Type` and `DEK-Info` lines come first), past the 2-line window in `parse/secrets.py` (from the M4h implementer)
 - [ ] `skill-remote-exec` does not scan a skill's supporting files (`references/*.md`, `resources/**`); 26 such files on this machine hold `curl … | sh`; decide whether bundled Markdown files count (from the M4h implementer)
 - [ ] MC7: MCP server instructions over 2,048 characters. Needs the server's own output (starting or contacting it), which offline-by-default forbids; left out of v1 (user, 2026-09-27)
+- [ ] Section citations that name a missing heading: a skill or instruction file cites `<file or skill> § "<Heading>"` (or "`<skill>` <Heading>") and the target has no such heading. `skill-link-broken`, `skill-file-unreferenced` and `reference-path-missing` resolve files only; nothing under `src/` resolves headings. Prior art: muthur `scripts/check-skill-catalog.sh` check 6 (github.com/vzakharov/muthur) (user, 2026-10-01)
+- [ ] Warn when the every-turn instruction files (CLAUDE.md plus its `@`-imports) pass a size threshold; muthur's `scripts/check-claude-md-size.sh` uses 30,000 characters. `instructions-too-large` (`src/rigcheck/rules/instructions.py:25`) fires only at Claude Code's 4 MiB skip, and the context budget never moves the exit status. Muthur's ratchet (a branch over the cap must come back to 29,000) needs a baseline that one offline run does not have (user, 2026-10-01)
 
 ## Decisions (user)
 
