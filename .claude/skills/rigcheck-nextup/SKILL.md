@@ -7,15 +7,18 @@ description: Profile for the user-level `nextup` skill in the rigcheck repo — 
 
 The generic loop is the user-level `nextup` skill; this file supplies only what is rigcheck-specific.
 
+siblings: none
+linear: rigcheck
+
 ## Plan and tracker
 
-- Index: `docs/plans/MAIN.md`, section `## Current focus`, then `## Next up`, then `## Backlog`. Each milestone line points into `docs/plans/v1.md`: its rule catalog names every rule by the research id it cites (`CM2`, `SK4`, `HK3`, `sota:#2`), and `docs/research/official.md` / `sota.md` hold each id's quote, check type and suggested severity. Read the id's entry there before writing a brief; never cite a rule from memory.
-- A milestone line that is too big for one brief (about 100 implementer calls: up to four steps or six files) is a *design* item: split it into lettered sub-items (`M3a`, `M3b`) in MAIN.md, grouped by rule module, and land the split before dispatching.
-- siblings: none
+- The plan lives in Linear: every task is a Linear issue in team RIG, per `~/.claude/docs/plan-operations.md`; `docs/plans/MAIN.md` is its generated snapshot, never edited by hand. Project order, which is the order the queue is worked: `M4 config rules`, `M5 to M7 CLI surface and packs`, `Backlog`. Each milestone issue points into `docs/plans/v1.md`: its rule catalog names every rule by the research id it cites (`CM2`, `SK4`, `HK3`, `sota:#2`), and `docs/research/official.md` / `sota.md` hold each id's quote, check type and suggested severity. Read the id's entry there before writing a brief; never cite a rule from memory.
+- A milestone issue that is too big for one brief (about 100 implementer calls: up to four steps or six files) is a *design* item: **split** it into lettered sub-issues (`M3a`, `M3b`), grouped by rule module, before dispatching.
 - Pre-loop hooks: none.
-- Finished-item convention: the landing commit **removes the line** from `docs/plans/MAIN.md` (the index holds open work only; git history keeps the item) after writing every ruling it settled into the owning rule-area doc under `docs/rules/` as current behaviour, undated (docs map below). A section left empty goes too. When every milestone of `v1.md` has landed, `git mv` it to `docs/plans/archive/` in the landing commit.
-- Tracker: `gh issue list --repo leftos/rigcheck --state open --json number,title`. No triage skill; place issues by the step-0 rule.
-- Pull requests: `gh pr list --repo leftos/rigcheck --state open --json number,title,headRefName`. An open PR from an item's own `<slug>` branch is that item still landing: cite `#N` on its line and finish the landing (Landing, below). Any other PR gets a line by the step-0 rule.
+- An item **land**s after its commit, once every ruling it settled is written into the owning rule-area doc under `docs/rules/` as current behaviour, undated (docs map below). When every milestone of `v1.md` has landed, `git mv` it to `docs/plans/archive/` in the landing commit.
+- A steer or a finding the item does not fix gets an **add**, in the project whose files it shares, else in `Backlog`.
+- Tracker: **triage** as plan-operations says (GitHub issues reach the team through Linear's sync; an untriaged one is top-level with no project), each placed in the project that shares its files, else in `Backlog`.
+- Pull requests: `gh pr list --repo leftos/rigcheck --state open --json number,title,headRefName`. An open PR from an item's own `<slug>` branch is that item still landing: finish the landing (Landing, below). Any other PR is triaged as plan-operations says.
 - Hotspots (two items touching one wait on each other): `src/rigcheck/model.py` (the `Kind`/`LoadClass` enums), `src/rigcheck/discover.py`, `src/rigcheck/rules/__init__.py` (the module import list), `tests/test_rule_catalog.py`.
 
 ## Rulings every brief carries
@@ -25,7 +28,7 @@ The generic loop is the user-level `nextup` skill; this file supplies only what 
 - **Offline by default:** no network and no model calls outside `--deep`; rigcheck never edits the files it checks.
 - **Secrets:** never read `~/.claude.json` whole, and never print file contents from the real home in a report or log; smoke runs against `$HOME` report counts only.
 
-- **Decision round**: the user wants this loop to run autonomously: rigcheck audits the agent's own harness, and the user trusts the orchestrator's educated design calls. Every open decision the docs, research and smoke corpus can inform (a matcher boundary, a fallback, a severity, what a rule covers inside its research entry, splitting a line into its own item, how to fix a false positive) is settled by the orchestrator, noted on the item's open plan line until it lands and then written into the owning `docs/rules/` doc (finished-item convention), and never asked. The user is asked only when the input is truly theirs: a new dependency, a change to the rulings under "Decisions (user)" in MAIN.md or to an earlier user ruling, dropping or adding a milestone, or docs and a probe that disagree with no way to settle it. A feature-branch verdict (an explorer's `BRANCH: feat/<name>`, or a hygiene pass's branch proposal) is always the user's, however well the smoke validates it (user-level `nextup` §3).
+- **Decision round**: the user wants this loop to run autonomously: rigcheck audits the agent's own harness, and the user trusts the orchestrator's educated design calls. Every open decision the docs, research and smoke corpus can inform (a matcher boundary, a fallback, a severity, what a rule covers inside its research entry, splitting a line into its own item, how to fix a false positive) is settled by the orchestrator, noted in a comment on the item's issue until it lands and then written into the owning `docs/rules/` doc (before the item **land**s), and never asked. The user is asked only when the input is truly theirs: a new dependency, a change to the decisions in `docs/README.md` "Decisions" or to an earlier user ruling, dropping or adding a milestone, or docs and a probe that disagree with no way to settle it. A feature-branch verdict (an explorer's `BRANCH: feat/<name>`, or a hygiene pass's branch proposal) is always the user's, however well the smoke validates it (user-level `nextup` §3).
 
 ## Agents and gates
 
@@ -58,7 +61,7 @@ The generic loop is the user-level `nextup` skill; this file supplies only what 
 | A CLI command, flag, exit code or JSON field | `README.md` usage section |
 | A term used in a project-specific sense (a pack, a load class, a layer) | `docs/README.md` Glossary |
 | A design ruling (a matcher boundary, a scope, a severity, a false-positive fix, a probe's result) | the rule-area doc in `docs/rules/` that owns the rule (a new area gets a new doc and a line in `docs/rules/README.md`), written as current behaviour with its reason, no dates |
-| An item finished | its line removed from `docs/plans/MAIN.md`, after its rulings are in `docs/rules/` |
+| An item finished | its issue **land**ed after the commit, once its rulings are in `docs/rules/` |
 
 The repo keeps no CHANGELOG yet.
 

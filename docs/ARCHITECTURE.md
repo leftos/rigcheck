@@ -41,7 +41,7 @@ One package, `src/rigcheck/`, built with `uv_build` (`pyproject.toml`); lint ban
 - **`report`** (`src/rigcheck/report/`): owns output: `terminal.py`, `json.py` (`SCHEMA_VERSION` 1) and `budget.py`, the context budget, which is a report and not a rule.
 - **`cli`** (`cli.py`): owns the `rigcheck check` command; it wires `discover`, `engine` and `report` and sets the exit status (0, 1 with a finding at or above `--fail-on`, 2 on a usage error).
 
-Rules modules `mcp.py` and `duplication.py` are docstring-only stubs; the config helpers they will use are in `src/rigcheck/rules/config.py`. What is planned is in [`plans/MAIN.md`](plans/MAIN.md).
+Rules modules `mcp.py` and `duplication.py` are docstring-only stubs; the config helpers they will use are in `src/rigcheck/rules/config.py`. What is planned is in Linear (team RIG), snapshot in [`plans/MAIN.md`](plans/MAIN.md).
 
 ## Integration Footguns
 
@@ -72,7 +72,7 @@ Rules modules `mcp.py` and `duplication.py` are docstring-only stubs; the config
 
 - [`README.md`](README.md): docs start page and glossary.
 - [`rules/README.md`](rules/README.md): one doc per rule area (what each rule checks, and the design it settles, with reasons).
-- [`plans/MAIN.md`](plans/MAIN.md): the plan index, open work only.
+- [`plans/MAIN.md`](plans/MAIN.md): the generated snapshot of the plan in Linear (team RIG).
 - [`plans/v1.md`](plans/v1.md): the v1 architecture sketch, rule catalog and milestones.
 - [`research/official.md`](research/official.md): official Claude Code guidance; every rule's `official:<id>` evidence points here.
 - [`research/sota.md`](research/sota.md): evidence-graded non-official work; `sota:#<n>` evidence points here.

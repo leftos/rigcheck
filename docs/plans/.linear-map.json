@@ -1,0 +1,79 @@
+{
+  "issues": {
+    "L14": {
+      "id": "21165579-5585-47af-9815-6036cbb66842",
+      "identifier": "RIG-3",
+      "linked": true
+    },
+    "L15": {
+      "id": "fe76c129-7966-404a-bd96-fa5410322bb2",
+      "identifier": "RIG-4",
+      "linked": true
+    },
+    "L16": {
+      "id": "145bd642-9fd9-4a63-b032-803a03e73808",
+      "identifier": "RIG-5",
+      "linked": true
+    },
+    "L22": {
+      "id": "41dd7db5-8875-4ebe-bbf6-a6a08935edb7",
+      "identifier": "RIG-6",
+      "linked": true
+    },
+    "L23": {
+      "id": "95f473f4-8430-4d0d-b201-66a7f17b0edd",
+      "identifier": "RIG-7",
+      "linked": true
+    },
+    "L24": {
+      "id": "419df818-b384-4ff1-ae08-697f37d64330",
+      "identifier": "RIG-8",
+      "linked": true
+    },
+    "L28": {
+      "id": "7087ff54-c61e-48cd-a5c1-1016d3bc11ae",
+      "identifier": "RIG-9",
+      "linked": true
+    },
+    "L29": {
+      "id": "ac247bea-5c1d-4582-a465-8fdfec1d85b1",
+      "identifier": "RIG-10",
+      "linked": true
+    },
+    "L30": {
+      "id": "9fdef559-331a-4012-a0a4-63bcb9e728a1",
+      "identifier": "RIG-11",
+      "linked": true
+    },
+    "L31": {
+      "id": "9ffd72b9-216a-44b8-b36a-61beb67b4e31",
+      "identifier": "RIG-12",
+      "linked": true
+    },
+    "L32": {
+      "id": "9b929fe4-d377-46fe-8e1d-392ce65cf522",
+      "identifier": "RIG-13",
+      "linked": true
+    },
+    "L33": {
+      "id": "98ffdbaf-8fb8-4472-8991-22d14d1f37a4",
+      "identifier": "RIG-14",
+      "linked": true
+    },
+    "L34": {
+      "id": "1a75c5f1-71ce-4b42-a037-2fed938337d5",
+      "identifier": "RIG-15",
+      "linked": true
+    },
+    "L35": {
+      "id": "1fa8c2bc-02d5-4865-bc60-887f7e404e60",
+      "identifier": "RIG-16",
+      "linked": true
+    }
+  },
+  "projects": {
+    "BL": "e1d4a3e6-20e4-41fe-a4a6-6d46b5ff8168",
+    "W2": "532105d2-3c5b-4535-88c4-7d5bd99afcde",
+    "W3": "582e7047-4c6f-4b18-9664-ddfbff2282f1"
+  }
+}

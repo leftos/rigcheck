@@ -25,7 +25,7 @@ After a discovery or rule change, run the real-repo smoke: `pwsh tools/gate.ps1 
 
 ## Structure
 
-Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first: its Task Index says which files to change for each kind of task, and its Integration Footguns list the cross-file changes. Terms (rig, layer, load class, pack, finding) are in the glossary in [docs/README.md](docs/README.md). The plan index is [docs/plans/MAIN.md](docs/plans/MAIN.md); the rule catalog is in [docs/plans/v1.md](docs/plans/v1.md).
+Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first: its Task Index says which files to change for each kind of task, and its Integration Footguns list the cross-file changes. Terms (rig, layer, load class, pack, finding) are in the glossary in [docs/README.md](docs/README.md). The plan lives in Linear: every task is a Linear issue in team RIG, grouped into projects worked in order (the `rigcheck-nextup` profile names the order). [docs/plans/MAIN.md](docs/plans/MAIN.md) is a generated snapshot of it, never edited by hand: change Linear, then regenerate it. A steer or finding mid-task gets an **add** first, before any reply in prose. The operations (**add**, **land**, **triage** and the rest) are in `~/.claude/docs/plan-operations.md`. The rule catalog is in [docs/plans/v1.md](docs/plans/v1.md).
 
 ## Rules a contributor would break
 

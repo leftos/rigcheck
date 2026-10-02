@@ -1,8 +1,21 @@
 # rigcheck docs
 
-Start here. The plan index is [plans/MAIN.md](plans/MAIN.md).
+Start here. The plan lives in Linear (team RIG); [plans/MAIN.md](plans/MAIN.md) is its generated snapshot.
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md): the architecture entry point: Task Index, layers, integration footguns, test locations and the deep docs.
+
+## Decisions
+
+The user's product decisions; a change to one is the user's call.
+
+- Targets: the Claude Code layer plus `AGENTS.md` as a peer file, including drift between the two.
+- Scope of a run: the effective setup; findings tagged by layer. Only the checked project's own memory folder is read.
+- Checks: deterministic and offline by default; semantic checks only behind `--deep`, sent through headless `claude -p`.
+- Fixes: findings carry a fix and rigcheck can write a fix brief; it never edits the checked files.
+- No overall score: findings ranked by severity × load cost.
+- Rule packs: `core` (sourced) and `house` (the user's conventions, written generically, enabled per machine).
+- Suppression: per-repo config, each entry with a mandatory reason; a reasonless suppression is itself a finding.
+- Public repo `leftos/rigcheck`, MIT license.
 
 ## Glossary
 
@@ -33,5 +46,5 @@ Start here. The plan index is [plans/MAIN.md](plans/MAIN.md).
 - **Bundled file**: a file inside a skill's folder other than SKILL.md that Claude may be meant to read or run.
 - **Rule-area doc**: one file under `docs/rules/` per group of related rules, stating what each rule checks and the design it settles, with reasons; see [rules/README.md](rules/README.md).
 - **Suppression**: a per-repo config entry that silences a rule, globally or for a path; every suppression must carry a reason.
-- **Feature marker**: `branch: feat/<name>` on a `docs/plans/MAIN.md` line; every item under it lands on the `feat/<name>` branch instead of `main` (user-level `nextup` §3, "Feature branches").
-- **Feature PR**: the draft pull request from a marker's `feat/<name>` into `main`, opened with the marker and merged with `--rebase` by `/ship` once every line under the marker is ticked.
+- **Feature marker**: `branch: feat/<name>` in a Linear project's content; every item under it lands on the `feat/<name>` branch instead of `main` (user-level `nextup` §3, "Feature branches").
+- **Feature PR**: the draft pull request from a marker's `feat/<name>` into `main`, opened with the marker and merged with `--rebase` by `/ship` once every issue in the marker's project has landed.
