@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 from rigcheck.discover import MAX_BYTES, discover, memory_dir
-from rigcheck.model import DEFAULT_WINDOW, Kind, Layer, McpScope
-from rigcheck.rules import REGISTRY
+from rigcheck.model import DEFAULT_WINDOW, Kind, Layer, McpScope, Severity
+from rigcheck.rules import PACKS, REGISTRY
 from support import FIXTURES, Workspace, git_add, run_json, symlink_or_skip, write
 
 ENGINE_RULES = {"internal-error", "discovery-error"}
@@ -131,7 +131,9 @@ def test_rule_has_evidence_and_summary(rule_id: str) -> None:
     assert rule.evidence
     assert rule.summary
     assert rule.fix
-    assert rule.pack == "core"
+    assert rule.pack in PACKS
+    if rule.pack == "advice":
+        assert rule.severity is Severity.INFO
 
 
 @pytest.mark.parametrize("rule_id", FIXTURE_RULES)

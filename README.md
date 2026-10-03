@@ -7,10 +7,17 @@ Status: early development. The instruction-file, `@import`, reference (stale pat
 ## Usage
 
 ```
-uv run rigcheck check [PATH] [--format text|json] [--home DIR] [--window SIZE] [--only ID[,ID...]] [--fail-on error|warn|info] [--sibling DIR]...
+uv run rigcheck check [PATH] [--format text|json] [--home DIR] [--window SIZE] [--packs PACK[,PACK...]] [--only ID[,ID...]] [--fail-on error|warn|info] [--sibling DIR]...
 ```
 
 Checks the setup Claude Code loads for `PATH` (default: the current directory): the repo's instruction files and `.claude/` folder, your `~/.claude`, enabled plugins, and that project's own memory folder. `rigcheck check ~` checks only `~/.claude`, its plugins and its memory. Both reports open with a context budget: ≈tokens for each file loaded every turn, and the skill listing and agent descriptions against Claude Code's limits (1% of the context window, set with `--window`, default `200k`; 15,000 tokens). The budget itself never changes the exit status; a listing past its limit also raises a warn finding (`skill-listing-over-budget`, `agent-descriptions-over-budget`), so `--window` moves that finding too. The text report groups findings by layer, with findings about the whole setup (the two over-budget warnings) under their own `setup` heading first; `--format json` gives a stable schema for agents.
+
+Every rule belongs to a pack:
+- `core`: defects backed by the docs or by graded evidence;
+- `advice`: info-only style advice that never fails a default run;
+- `house`: opinionated conventions.
+
+`--packs PACK[,PACK...]` picks the packs whose rules run (default `core,advice`; `house` runs only when named). Rules outside the selection do not run, except a rule named in `--only`, and the engine and suppression rules, which always run.
 
 `--only ID[,ID...]` reports only the findings of those rule ids (the other rules still run; an unknown id exits 2 and names the closest ids). `--fail-on error|warn|info` sets the lowest finding severity that makes the exit status 1 (default `error`). Exit status: 0 clean, 1 a finding at or above `--fail-on`, 2 a usage error. Repo docs (`docs/**/*.md` and `Docs/**/*.md`, without `plans/` or `archive/` folders) are discovered as kind `doc`. A line containing `<!-- rigcheck: allow reference-path-missing -->` silences that rule on the line and the next.
 

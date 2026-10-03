@@ -13,7 +13,7 @@ The user's product decisions; a change to one is the user's call.
 - Checks: deterministic and offline by default; semantic checks only behind `--deep`, sent through headless `claude -p`.
 - Fixes: findings carry a fix and rigcheck can write a fix brief; it never edits the checked files.
 - No overall score: findings ranked by severity × load cost.
-- Rule packs: `core` (sourced) and `house` (the user's conventions, written generically, enabled per machine).
+- Rule packs: `core` (sourced), `advice` (info-only style advice, citing the doc and its null result) and `house` (the user's conventions, written generically, enabled per machine).
 - Suppression: per-repo config, each entry with a mandatory reason; a reasonless suppression is itself a finding.
 - Public repo `leftos/rigcheck`, MIT license.
 
@@ -26,7 +26,12 @@ The user's product decisions; a change to one is the user's call.
 - **Load class**: when an artifact enters the context: `every-turn`, `on-invoke` (a skill body, a subagent prompt), `on-demand` (nested CLAUDE.md, path-scoped rules, memory topics), `config` (settings, hooks, MCP, which cost nothing unless they inject text), or `not-loaded` (a file Claude Code never reads, such as a shadowed AGENTS.md or an import past four hops).
 - **Load cost**: how often a file's content enters the context: every turn (CLAUDE.md, skill and agent descriptions, hook-injected text) or on demand (a skill body, a subagent prompt). Findings are ranked by severity × load cost.
 - **Context budget**: the report section, not a rule, that estimates (≈) the tokens a setup costs: every-turn files, the skill listing against 1% of the context window, and agent descriptions against 15,000 tokens. A listing past its limit is also reported as a warn finding.
-- **Pack**: a named set of rules. `core` holds rules backed by official documentation or graded evidence; `house` holds opinionated conventions and is off unless enabled.
+- **Pack**: a named set of rules, selected with `--packs`.
+  - `core` holds rules backed by official documentation or graded evidence.
+  - `advice` holds info-only style advice that cites a doc together with the null result against it.
+  - `house` holds opinionated conventions and is off unless named.
+
+  `core` and `advice` run by default.
 - **Deep check**: an opt-in check (`--deep`) that asks Claude, through headless `claude -p`, to judge what code cannot: contradictions, reworded duplicates, vague instructions.
 - **Fix brief**: a Markdown file rigcheck writes that an agent can execute to fix a set of findings. rigcheck never edits the checked files itself.
 - **Covered**: a command is covered when a permission allow rule matches it, as Claude Code matches `Bash(...)` specifiers: each subcommand of a compound command on its own. `skill-injection-not-allowed` reports injected commands that nothing covers.

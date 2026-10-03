@@ -8,10 +8,10 @@ from pathlib import Path
 
 from rigcheck import __version__, engine
 from rigcheck.discover import discover
-from rigcheck.model import DEFAULT_WINDOW, Finding, Outcome, Severity, Suppressed
+from rigcheck.model import DEFAULT_WINDOW, Finding, Outcome, Rule, Severity, Suppressed
 from rigcheck.report import budget, terminal
 from rigcheck.report import json as json_report
-from rigcheck.rules import REGISTRY
+from rigcheck.rules import DEFAULT_PACKS, PACKS, REGISTRY
 
 USAGE_ERROR = 2
 WINDOW_ERROR = "window must be a positive number of tokens, like 200k or 1m"
@@ -41,6 +41,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="a sibling checkout where a path named in a doc, skill, agent or command may exist instead (repeatable)",
     )
     check.add_argument("--only", type=parse_only, default=None, metavar="ID[,ID...]", help="report only the findings of these rule ids")
+    check.add_argument(
+        "--packs",
+        type=parse_packs,
+        default=DEFAULT_PACKS,
+        metavar="PACK[,PACK...]",
+        help="packs whose rules run (default: core,advice; house is off unless named)",
+    )
     check.add_argument(
         "--fail-on",
         choices=[severity.value for severity in Severity],
@@ -72,6 +79,27 @@ def parse_only(value: str) -> frozenset[str]:
     return frozenset(ids)
 
 
+def parse_packs(value: str) -> frozenset[str]:
+    """Parse a comma-separated list of pack names, each of which must be one of ``PACKS``.
+
+    Args:
+        value: The command-line value, like ``core,house``.
+
+    Returns:
+        The pack names.
+
+    Raises:
+        argparse.ArgumentTypeError: When the list is empty, an item is blank, or a name is unknown.
+    """
+    names = [part.strip() for part in value.split(",")]
+    if not all(names):
+        raise argparse.ArgumentTypeError(f"empty pack name in {value!r}; give packs like core,advice")
+    for name in names:
+        if name not in PACKS:
+            raise argparse.ArgumentTypeError(f"unknown pack {name!r}; packs are core, advice and house")
+    return frozenset(names)
+
+
 def parse_window(value: str) -> int:
     """Parse a context window size: a positive integer, optionally suffixed ``k`` (thousands) or ``m`` (millions), any case.
 
@@ -88,6 +116,16 @@ def parse_window(value: str) -> int:
     if match is None:
         raise argparse.ArgumentTypeError(WINDOW_ERROR)
     return int(match[1]) * _WINDOW_MULTIPLIERS[match[2].lower()]
+
+
+def _rules_to_run(packs: frozenset[str], only: frozenset[str] | None) -> list[Rule]:
+    """Return the rules to run: those whose pack is selected, every rule ``--only`` names, and the engine and suppression rules."""
+    return [rule for rule in REGISTRY.values() if rule.pack in packs or rule.id in engine.UNSUPPRESSIBLE or (only is not None and rule.id in only)]
+
+
+def _ran_ids(rules: list[Rule]) -> frozenset[str]:
+    """Return the ids of the rules that ran, the set ``apply_suppressions`` uses to tell a skipped rule's entry apart."""
+    return frozenset(rule.id for rule in rules)
 
 
 def _select(outcome: Outcome, only: frozenset[str] | None) -> tuple[list[Finding], list[Suppressed]]:
@@ -110,7 +148,9 @@ def _check(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         if not sibling.is_dir():
             parser.error(f"--sibling is not a directory: {sibling}")
     rig = discover(target, home, args.window, siblings=siblings)
-    findings, suppressed = _select(engine.apply_suppressions(rig, engine.run(rig, REGISTRY.values())), args.only)
+    rules = _rules_to_run(args.packs, args.only)
+    outcome = engine.apply_suppressions(rig, engine.run(rig, rules), _ran_ids(rules))
+    findings, suppressed = _select(outcome, args.only)
     report = budget.compute(rig)
     if args.format == "json":
         output = json_report.render(rig, findings, suppressed, report)

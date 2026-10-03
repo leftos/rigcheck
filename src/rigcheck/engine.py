@@ -66,17 +66,25 @@ def _unused(rig: Rig, suppression: Suppression) -> Finding:
     return Finding("suppression-unused", meta.severity, path, suppression.line, message, meta.fix, Layer.REPO, LoadClass.NOT_LOADED)
 
 
-def apply_suppressions(rig: Rig, findings: list[Finding]) -> Outcome:
+def _skipped(ran: frozenset[str], suppression: Suppression) -> bool:
+    """Return True when the entry names a registered rule that did not run, so it counts as neither used nor unused."""
+    return suppression.rule in REGISTRY and suppression.rule not in ran
+
+
+def apply_suppressions(rig: Rig, findings: list[Finding], ran: frozenset[str]) -> Outcome:
     """Split findings into the kept and the suppressed by the repo's ``.rigcheck.toml`` entries.
 
     An entry matches a repo-layer or setup finding of its rule, limited to files its ``path`` glob matches when it
     has one. The first matching entry in file order takes a finding; every entry that matches at least one finding
-    counts as used, and each unused entry becomes a ``suppression-unused`` finding. Findings of the user, memory and
-    plugin layers, and of the engine and suppression rules, are never suppressed.
+    counts as used, and each unused entry becomes a ``suppression-unused`` finding. An entry naming a registered
+    rule that did not run is neither used nor unused, since a rule that never ran could not match it; an entry
+    naming no registered rule at all is still unused. Findings of the user, memory and plugin layers, and of the
+    engine and suppression rules, are never suppressed.
 
     Args:
         rig: The discovered setup, holding the suppressions.
         findings: The findings of a run.
+        ran: The ids of the rules that ran.
 
     Returns:
         The kept findings plus the ``suppression-unused`` ones, ranked, and the suppressed findings, ranked.
@@ -91,7 +99,7 @@ def apply_suppressions(rig: Rig, findings: list[Finding]) -> Outcome:
             suppressed.append(Suppressed(finding, rig.suppressions[matching[0]]))
         else:
             kept.append(finding)
-    unused = [_unused(rig, suppression) for index, suppression in enumerate(rig.suppressions) if index not in used]
+    unused = [_unused(rig, suppression) for index, suppression in enumerate(rig.suppressions) if index not in used and not _skipped(ran, suppression)]
     return Outcome(findings=rank([*kept, *unused]), suppressed=sorted(suppressed, key=lambda entry: _rank_key(entry.finding)))
 
 
