@@ -6,7 +6,7 @@ from typing import Any
 
 from rigcheck import __version__
 from rigcheck.engine import count_by_severity
-from rigcheck.model import Artifact, Finding, Rig
+from rigcheck.model import Artifact, Finding, Rig, Suppressed
 from rigcheck.parse.tokens import INSTRUCTION_CHARS_PER_TOKEN, estimate
 from rigcheck.report.budget import Budget, Listing, loaded_text
 from rigcheck.rules import REGISTRY
@@ -61,15 +61,17 @@ def _budget(budget: Budget) -> dict[str, Any]:
     }
 
 
-def render(rig: Rig, findings: list[Finding], budget: Budget) -> str:
-    """Render ranked findings, the context budget and the rig's artifacts as JSON.
+def render(rig: Rig, findings: list[Finding], suppressed: list[Suppressed], budget: Budget) -> str:
+    """Render ranked findings, the suppressed findings, the context budget and the rig's artifacts as JSON.
 
     Enum values are lower-case strings, paths are POSIX strings, findings keep their rank
-    order and artifacts are sorted by layer, then path.
+    order and artifacts are sorted by layer, then path. A suppressed finding carries the
+    reason its entry gives, or null.
 
     Args:
         rig: The rig the findings are about.
         findings: Ranked findings.
+        suppressed: Ranked findings a ``.rigcheck.toml`` entry silenced.
         budget: The rig's context budget.
 
     Returns:
@@ -82,8 +84,9 @@ def render(rig: Rig, findings: list[Finding], budget: Budget) -> str:
         "rigcheck": __version__,
         "target": rig.target.as_posix(),
         "repo_root": rig.repo_root.as_posix(),
-        "summary": {severity.value: count for severity, count in counts.items()},
+        "summary": {**{severity.value: count for severity, count in counts.items()}, "suppressed": len(suppressed)},
         "findings": [_finding(finding) for finding in findings],
+        "suppressed": [{**_finding(entry.finding), "reason": entry.suppression.reason} for entry in suppressed],
         "budget": _budget(budget),
         "artifacts": [_artifact(rig, artifact) for artifact in artifacts],
     }

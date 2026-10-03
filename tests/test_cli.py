@@ -92,6 +92,50 @@ def test_fail_on_rejects_an_unknown_severity(workspace: Workspace) -> None:
     assert exit_info.value.code == 2
 
 
+def _suppress(rig: Path, *entries: str) -> None:
+    write(rig / ".rigcheck.toml", "\n".join(f"[[suppress]]\n{entry}" for entry in entries))
+
+
+def test_suppressed_finding_does_not_fail(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rig = workspace.rig()
+    write(rig / "CLAUDE.md", "# Project\n\n@missing.md\n")
+    assert _check(workspace, rig, "--fail-on", "error") == 1
+    _suppress(rig, 'rule = "import-unresolved"\nreason = "generated at build time"\n')
+    assert _check(workspace, rig, "--fail-on", "error") == 0
+    capsys.readouterr()
+
+
+def test_json_lists_suppressed_with_reason(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rig = _warn_rig(workspace)
+    _suppress(rig, 'rule = "reference-path-missing"\nreason = "moved"\n')
+    _check(workspace, rig, "--format", "json")
+    report = json.loads(capsys.readouterr().out)
+    assert report["summary"]["suppressed"] == 1
+    assert "reference-path-missing" not in [finding["rule"] for finding in report["findings"]]
+    [entry] = report["suppressed"]
+    assert (entry["rule"], entry["line"], entry["reason"]) == ("reference-path-missing", 1, "moved")
+    assert entry["path"].endswith("/CLAUDE.md")
+
+
+def test_json_reason_null_when_missing(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rig = _warn_rig(workspace)
+    _suppress(rig, 'rule = "reference-path-missing"\n')
+    _check(workspace, rig, "--format", "json")
+    [entry] = json.loads(capsys.readouterr().out)["suppressed"]
+    assert entry["reason"] is None
+
+
+def test_only_filters_suppressed(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rig = _warn_rig(workspace, "Read `docs/gone.md`.\n\n@missing.md\n")
+    _suppress(rig, 'rule = "reference-path-missing"\nreason = "moved"\n', 'rule = "import-unresolved"\nreason = "generated"\n')
+    _check(workspace, rig, "--format", "json")
+    assert {entry["rule"] for entry in json.loads(capsys.readouterr().out)["suppressed"]} == {"reference-path-missing", "import-unresolved"}
+    _check(workspace, rig, "--format", "json", "--only", "reference-path-missing")
+    report = json.loads(capsys.readouterr().out)
+    assert [entry["rule"] for entry in report["suppressed"]] == ["reference-path-missing"]
+    assert report["summary"]["suppressed"] == 1
+
+
 def test_sibling_that_is_not_a_directory_is_a_usage_error(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     missing = workspace.home / "work" / "no-such-sibling"
     with pytest.raises(SystemExit) as exit_info:

@@ -135,6 +135,32 @@ class Finding:
 
 
 @dataclass(frozen=True)
+class Suppressed:
+    """A finding that a ``.rigcheck.toml`` entry silenced.
+
+    Attributes:
+        finding: The silenced finding.
+        suppression: The first entry, in file order, that matched it.
+    """
+
+    finding: Finding
+    suppression: Suppression
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """The findings of a run once the repo's suppressions are applied.
+
+    Attributes:
+        findings: The findings no entry matched, plus one ``suppression-unused`` finding per entry that matched nothing, ranked.
+        suppressed: The silenced findings with the entry that took each, ranked by their finding.
+    """
+
+    findings: list[Finding]
+    suppressed: list[Suppressed]
+
+
+@dataclass(frozen=True)
 class Rule:
     """A check with the metadata that explains and ranks its findings."""
 

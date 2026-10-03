@@ -7,7 +7,7 @@ import pytest
 from rigcheck import engine
 from rigcheck.cli import main
 from rigcheck.discover import discover
-from rigcheck.model import DEFAULT_WINDOW, Finding, Layer, LoadClass, Rig, Rule, Severity
+from rigcheck.model import DEFAULT_WINDOW, Finding, Layer, LoadClass, Rig, Rule, Severity, Suppressed, Suppression
 from rigcheck.report import budget, terminal
 from rigcheck.rules import REGISTRY
 from support import Workspace, run_cli, run_json, write
@@ -61,9 +61,10 @@ def test_json_report_schema_and_determinism(workspace: Workspace, capsys: pytest
     _, third_text = run_cli(capsys, repo, workspace.home, "json")
     assert second_text == third_text
     assert code == 1
-    assert set(first) == {"schema", "rigcheck", "target", "repo_root", "summary", "findings", "budget", "artifacts"}
+    assert set(first) == {"schema", "rigcheck", "target", "repo_root", "summary", "findings", "suppressed", "budget", "artifacts"}
     assert first["schema"] == 1
-    assert set(first["summary"]) == {"error", "warn", "info"}
+    assert set(first["summary"]) == {"error", "warn", "info", "suppressed"}
+    assert (first["summary"]["suppressed"], first["suppressed"]) == (0, [])
     assert first["summary"]["error"] >= 1
     finding_keys = {"rule", "severity", "layer", "load_class", "path", "line", "message", "fix", "evidence"}
     assert all(set(finding) == finding_keys for finding in first["findings"])
@@ -89,15 +90,31 @@ def test_text_report_colors_only_when_asked(workspace: Workspace) -> None:
     rig = discover(_bad_rig(workspace), workspace.home, DEFAULT_WINDOW)
     findings = engine.run(rig, REGISTRY.values())
     report = budget.compute(rig)
-    assert ANSI.search(terminal.render(rig, findings, report, color=True))
-    assert not ANSI.search(terminal.render(rig, findings, report, color=False))
+    assert ANSI.search(terminal.render(rig, findings, [], report, color=True))
+    assert not ANSI.search(terminal.render(rig, findings, [], report, color=False))
+
+
+def test_terminal_footer_counts_suppressed(workspace: Workspace) -> None:
+    rig = discover(workspace.rig(), workspace.home, DEFAULT_WINDOW)
+    finding = Finding("reference-path-missing", Severity.WARN, rig.repo_root / "CLAUDE.md", 1, "gone", "Fix it.", Layer.REPO, LoadClass.EVERY_TURN)
+    entry = Suppressed(finding, Suppression("reference-path-missing", None, "moved", 1))
+    out = terminal.render(rig, [], [entry, entry], budget.compute(rig), color=False)
+    assert out.rstrip().endswith("0 errors · 0 warnings · 0 info · 2 suppressed")
+    assert "gone" not in out
+
+
+def test_terminal_footer_unchanged_without_suppressions(workspace: Workspace) -> None:
+    rig = discover(workspace.rig(), workspace.home, DEFAULT_WINDOW)
+    out = terminal.render(rig, [], [], budget.compute(rig), color=False)
+    assert out.rstrip().endswith("0 errors · 0 warnings · 0 info")
+    assert "suppressed" not in out
 
 
 def test_setup_findings_have_their_own_heading(workspace: Workspace) -> None:
     rig = discover(workspace.rig(), workspace.home, DEFAULT_WINDOW)
     setup = Finding("skill-listing-over-budget", Severity.WARN, None, None, "skill listing over budget", "Trim it.", None, LoadClass.EVERY_TURN)
     fault = Finding("internal-error", Severity.ERROR, None, None, "boom", "Report it.", None, None)
-    lines = terminal.render(rig, [setup, fault], budget.compute(rig), color=False).splitlines()
+    lines = terminal.render(rig, [setup, fault], [], budget.compute(rig), color=False).splitlines()
     assert "setup" in lines
     assert "rigcheck" in lines
     assert lines.index("setup") < lines.index("rigcheck")
@@ -155,7 +172,7 @@ def test_text_report_marks_a_listing_over_budget(workspace: Workspace, capsys: p
     agents = next(line for line in lines if line.startswith("  agent descriptions"))
     assert "over budget" not in agents
     rig = discover(repo, workspace.home, 1_500)
-    colored = terminal.render(rig, [], budget.compute(rig), color=True)
+    colored = terminal.render(rig, [], [], budget.compute(rig), color=True)
     assert "\x1b[33m" in next(line for line in colored.splitlines() if line.startswith("  skill listing"))
 
 

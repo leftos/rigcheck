@@ -143,5 +143,22 @@ def matches_any(pattern: str, files: frozenset[str]) -> bool:
     Returns:
         True when some file matches.
     """
-    relative = pattern.removeprefix("./")
-    return any(glob.globmatch(name, relative, flags=_MATCH_FLAGS) for name in files)
+    return any(matches_path(pattern, name) for name in files)
+
+
+def matches_path(pattern: str, name: str) -> bool:
+    """Return True when the pattern matches one file.
+
+    Matching follows Claude Code's picomatch semantics as closely as wcmatch allows: ``**``
+    crosses folders, braces expand, ``*`` and ``**`` match dotfiles, ``/`` is the only
+    separator, and case folds on Windows only. The pattern is a file glob: ``docs/**``
+    matches the files under ``docs/``, while ``docs`` matches only a file named ``docs``.
+
+    Args:
+        pattern: One glob; a leading ``./`` is ignored.
+        name: A repository-relative POSIX path.
+
+    Returns:
+        True when the file matches.
+    """
+    return glob.globmatch(name, pattern.removeprefix("./"), flags=_MATCH_FLAGS)
