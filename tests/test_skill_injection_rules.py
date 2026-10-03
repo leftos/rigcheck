@@ -249,3 +249,149 @@ def test_argument_unused_skips_other_types(workspace: Workspace, value: str) -> 
 def test_argument_unused_ignores_the_frontmatter_itself(workspace: Workspace) -> None:
     text = "---\nname: demo\ndescription: Uses $issue.\narguments: issue\n---\nBody.\n"
     assert _findings(workspace, "skill-argument-unused", text) == [(_unused("issue"), 4)]
+
+
+RULE = "skill-injection-not-allowed"
+
+
+def _not_allowed(program: str) -> str:
+    return (
+        f"injected command `{program}` is not covered by allowed-tools or a settings allow rule, "
+        "so Claude Code aborts the invocation outside auto mode"
+    )
+
+
+def _allowed(tools: str, body: str) -> str:
+    """A skill whose frontmatter allows ``tools`` and whose body is ``body``; the body starts on line 7."""
+    return f"---\nname: demo\ndescription: Demo skill. Use when testing rigcheck fixtures.\nallowed-tools: {tools}\n---\n\n{body}"
+
+
+def test_not_allowed_reports_uncovered_injection(workspace: Workspace) -> None:
+    findings = _findings(workspace, RULE, _allowed("Bash(ls:*)", "Status: !`git status`\n"))
+    assert len(findings) == 1
+    message, line = findings[0]
+    assert line == 7
+    assert "`git`" in message
+    assert "status" not in message
+
+
+@pytest.mark.parametrize("tools", ["Bash(git status:*)", "Bash(git status *)"])
+def test_not_allowed_silent_when_covered(workspace: Workspace, tools: str) -> None:
+    assert _findings(workspace, RULE, _allowed(tools, "!`git status`\n")) == []
+
+
+def test_not_allowed_silent_without_allowed_tools(workspace: Workspace) -> None:
+    text = "---\nname: demo\ndescription: Demo skill.\n---\n\n!`git status`\n"
+    assert _findings(workspace, RULE, text) == []
+
+
+@pytest.mark.parametrize("tools", ["Bash", "Bash(*)"])
+def test_not_allowed_bare_bash_covers_all(workspace: Workspace, tools: str) -> None:
+    assert _findings(workspace, RULE, _allowed(tools, "!`git status`\n")) == []
+
+
+def test_not_allowed_empty_specifier_covers_nothing(workspace: Workspace) -> None:
+    assert _findings(workspace, RULE, _allowed("Bash()", "!`git status`\n")) == [(_not_allowed("git"), 7)]
+
+
+def test_not_allowed_non_bash_entries_cover_nothing(workspace: Workspace) -> None:
+    assert _findings(workspace, RULE, _allowed("Read", "!`git status`\n")) == [(_not_allowed("git"), 7)]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        _allowed("Bash(git status:*), Read", "!`git status`\n"),
+        "---\nname: demo\ndescription: D.\nallowed-tools:\n  - Bash(git status:*)\n  - Read\n---\n\n!`git status`\n",
+    ],
+)
+def test_not_allowed_list_and_string_forms(workspace: Workspace, text: str) -> None:
+    assert _findings(workspace, RULE, text) == []
+
+
+def test_not_allowed_each_subcommand_must_be_covered(workspace: Workspace) -> None:
+    text = _allowed("Bash(git status:*)", "!`git status && rm -rf build`\n")
+    assert _findings(workspace, RULE, text) == [(_not_allowed("rm"), 7)]
+
+
+@pytest.mark.parametrize(
+    ("tools", "body", "program"),
+    [
+        ("Bash(git log:*)", "!`git log |& head`\n", "head"),
+        ("Bash(git status:*)", "!`sleep 1 & git status`\n", "sleep"),
+    ],
+)
+def test_not_allowed_splits_operators(workspace: Workspace, tools: str, body: str, program: str) -> None:
+    assert _findings(workspace, RULE, _allowed(tools, body)) == [(_not_allowed(program), 7)]
+
+
+@pytest.mark.parametrize("body", ["!`git status 2>&1`\n", "!`git status &>out.log`\n"])
+def test_not_allowed_redirection_ampersand_is_not_a_separator(workspace: Workspace, body: str) -> None:
+    assert _findings(workspace, RULE, _allowed("Bash(git status:*)", body)) == []
+
+
+@pytest.mark.parametrize(
+    ("tools", "body"),
+    [
+        ("Bash(ls:*)", "!`echo $(date)`\n"),
+        ("Bash(ls:*)", "```!\nif true; then date; fi\n```\n"),
+        ("Bash(ls:*)", "!`(cd x; date)`\n"),
+        ("Bash(ls:*)", "!`date &&`\n"),
+        ("Bash(ls:*)", "```!\ndate \\\n--utc\n```\n"),
+        ("Bash(ls:*)", "```!\ncat <<EOF\n```\n"),
+        ("Bash(ls:*)", "!`! git diff --quiet`\n"),
+        ("Bash(date:*)", "!`date >| out.txt`\n"),
+        ("Bash(echo:*)", "!`echo a\\&b`\n"),
+        ("Bash(echo:*)", '```!\necho "a\\"&b"\n```\n'),
+    ],
+)
+def test_not_allowed_skips_unanalysable(workspace: Workspace, tools: str, body: str) -> None:
+    assert _findings(workspace, RULE, _allowed(tools, body)) == []
+
+
+@pytest.mark.parametrize(
+    ("tools", "body"),
+    [
+        ("Bash(ls:*)", "!`timeout 5 date`\n"),
+        ("Bash(ls:*)", "!`FOO=1 date`\n"),
+        ("Bash(timeout 5 date)", "!`timeout 5 date`\n"),
+    ],
+)
+def test_not_allowed_skips_wrappers_and_assignments(workspace: Workspace, tools: str, body: str) -> None:
+    assert _findings(workspace, RULE, _allowed(tools, body)) == []
+
+
+@pytest.mark.parametrize("body", ["!`python ${CLAUDE_SKILL_DIR}/x.py`\n", "!`cat $1`\n", "!`echo $ARGUMENTS`\n"])
+def test_not_allowed_skips_placeholders(workspace: Workspace, body: str) -> None:
+    assert _findings(workspace, RULE, _allowed("Bash(ls:*)", body)) == []
+
+
+def test_not_allowed_fence_reports_the_segment_line(workspace: Workspace) -> None:
+    text = _allowed("Bash(ls:*)", "```!\nls\ndate\n```\n")
+    assert _findings(workspace, RULE, text) == [(_not_allowed("date"), 9)]
+
+
+def test_not_allowed_skips_literal_injection(workspace: Workspace) -> None:
+    assert _findings(workspace, RULE, _allowed("Bash(ls:*)", "KEY=!`date`\n")) == []
+
+
+def test_not_allowed_skips_non_bash_shell(workspace: Workspace) -> None:
+    text = "---\nname: demo\ndescription: D.\nallowed-tools: Bash(ls:*)\nshell: powershell\n---\n\n!`Get-Date`\n"
+    assert _findings(workspace, RULE, text) == []
+
+
+def test_not_allowed_blank_shell_is_bash(workspace: Workspace) -> None:
+    text = "---\nname: demo\ndescription: D.\nallowed-tools: Bash(ls:*)\nshell:\n---\n\n!`date`\n"
+    assert _findings(workspace, RULE, text) == [(_not_allowed("date"), 8)]
+
+
+def test_not_allowed_settings_allow_covers(workspace: Workspace) -> None:
+    text = _allowed("Read", "!`git status`\n")
+    assert _findings(workspace, RULE, text) == [(_not_allowed("git"), 7)]
+    write(workspace.rig() / ".claude" / "settings.json", '{"permissions": {"allow": ["Bash(git status:*)"]}}\n')
+    assert _findings(workspace, RULE, text) == []
+
+
+def test_not_allowed_checks_commands(workspace: Workspace) -> None:
+    text = "---\ndescription: x\nallowed-tools: Bash(ls:*)\n---\n\n!`git status`\n"
+    assert _findings(workspace, RULE, text, COMMAND) == [(_not_allowed("git"), 6)]

@@ -146,6 +146,11 @@ def _entries(rig: Rig) -> list[_Entry]:
     return entries
 
 
+def settings_allow_rules(rig: Rig) -> list[PermissionRule]:
+    """Return the parsed ``allow`` rules of the repo and user settings files, in rig order."""
+    return [entry.rule for entry in _entries(rig) if entry.list_name == "allow"]
+
+
 def _mcp_covers(blocker: PermissionRule, allowed: PermissionRule) -> bool:
     """Return True when ``blocker`` names a whole MCP server (``mcp__s`` or ``mcp__s__*``) that ``allowed`` is a tool of."""
     if blocker.specifier is not None or not blocker.tool.startswith("mcp__"):

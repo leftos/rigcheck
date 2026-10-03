@@ -21,6 +21,7 @@ Skills (`skills/<name>/SKILL.md` and the files bundled in its folder) and legacy
 | `skill-fork-option-ignored` | warn | `official:SK20` |
 | `skill-allowed-tools-broad` | warn | `official:SK21` |
 | `skill-injection-literal` | warn | `official:SK22` |
+| `skill-injection-not-allowed` | warn | `official:SK22` |
 | `skill-injection-relative-path` | warn | `official:SK23` |
 | `skill-dollar-digit` | warn | `official:SK24` |
 | `skill-argument-unused` | warn | `official:SK24` |
@@ -65,4 +66,9 @@ These rules read skills and commands on every layer, and only the file itself (n
 - `skill-dollar-digit` reports `$` followed by digits in prose only: code spans, code blocks, HTML, link destinations and titles are excluded. Exactly one backslash before the `$` escapes it; none, or two or more, leave it to expand.
 - `skill-argument-unused` reports a name declared in `arguments` (a space-separated string or a list of strings) that the body never uses as `$name`; a use anywhere in the body counts, code included, unless one backslash escapes it.
 - The docs do not say whether Claude Code substitutes inside code spans and fences; these rules assume it does not.
-- The deterministic parts of SK22 and SK24 are what ship. Whether an injected command is covered by `allowed-tools` is not checked.
+- `skill-injection-not-allowed` reports a non-literal injection with a subcommand that no `Bash` rule covers, because outside auto mode a permission check that is not "allow" aborts the invocation. It reads only a skill or command that has an `allowed-tools` key: without one, the command's permission comes from settings or auto mode, which the author chose not to pin. The covering rules are the `Bash` entries of `allowed-tools` (both the list and the comma-string form) plus the `Bash` allow rules of the repo and user settings files, which the same permission check reads. A bare `Bash` or `Bash(*)` covers every command, `Bash()` covers none, and other tools (`PowerShell(...)` included) cover none. A component whose `shell` is set to anything but `bash` is skipped; a blank `shell` counts as bash.
+- Each subcommand must be covered on its own, as Claude Code matches them: lines are split on `&&`, `||`, `;`, `|`, `|&`, a background `&` and newlines, outside quotes, after cutting a `#` comment; the `&` of `>&`, `<&` and `&>` is a redirection, not a separator. Coverage is `bash_covers` against the whole subcommand.
+- An injection this lexical pass cannot read is skipped whole rather than guessed at: one holding `$(`, a backtick, `<<`, `>|`, a backslash before `&`, `|`, `;` or a quote, a line ending in `\`, `&&` or `||`, or a subcommand opening with `(`, `{`, `!` or a compound-command keyword (`if`, `for`, `while`, `case`, `function` and their continuations).
+- A subcommand is skipped unless covered as written when it starts with an assignment (`FOO=1 cmd`) or a wrapper Claude Code strips (`timeout`, `time`, `nice`, `nohup`, `stdbuf`, `command`, `builtin`, `noglob`, `xargs`), or holds a `$` variable or placeholder (`$ARGUMENTS`, `$1`, `${CLAUDE_SKILL_DIR}`, `$HOME`): the docs say only deny and ask rules match past an assignment, wrapper arguments vary, and placeholders are substituted before the check sees the command.
+- One finding per injection, at the first uncovered subcommand's line; the message names only that subcommand's program word, since the rest of a command may carry a credential.
+- SK22's other clause, injected commands likely to exit non-zero, is not checked. SK24's deterministic parts ship as `skill-dollar-digit` and `skill-argument-unused`.
