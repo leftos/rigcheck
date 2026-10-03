@@ -13,6 +13,7 @@ rigcheck is a local validator for the instruction layer of coding agents (`CLAUD
 | Discover a new kind of file | `src/rigcheck/model.py` (`Kind`) → `src/rigcheck/discover.py` (`_CLAUDE_DIR_FILES`, `_PLUGIN_FILES`) → `tests/test_discover.py` | [`plans/v1.md`](plans/v1.md) |
 | Change how `@imports`, memory or the instruction chain are found | `src/rigcheck/discover.py` → `src/rigcheck/parse/markdown.py` → `src/rigcheck/rules/instructions.py`, `memory.py` | [`rules/instructions.md`](rules/instructions.md), [`rules/discovery.md`](rules/discovery.md) |
 | Change stale-path or script-reference detection | `src/rigcheck/rules/references.py` → `src/rigcheck/parse/markdown.py` → `tests/test_references.py` | [`rules/instructions.md`](rules/instructions.md) |
+| Add a cross-file text rule over the every-turn instruction files (duplicates) | `src/rigcheck/rules/duplication.py` → `src/rigcheck/rules/references.py` (`_scanned`, `inside`) → `src/rigcheck/report/budget.py` (`_every_turn`) → `src/rigcheck/parse/markdown.py` (`prose_segments`) → `src/rigcheck/parse/frontmatter.py` (`body_line`) → `tests/test_duplication_rules.py`, `tests/fixtures/duplicate-line/` | [`rules/duplication.md`](rules/duplication.md) |
 | Discover repo docs | `src/rigcheck/discover.py` (`DOC_ROOTS`, `_is_doc`, `_add_docs`) → `tests/test_discover.py` | [`plans/v1.md`](plans/v1.md) |
 | Change which agent names a skill's prose dispatches | `src/rigcheck/rules/agent_refs.py` (`dispatched_agents`) → `tests/test_agent_ref_rules.py` | [`research/builtin-tables-probe.md`](research/builtin-tables-probe.md) |
 | Change rule `paths` glob handling | `src/rigcheck/parse/globs.py` → `src/rigcheck/rules/rules_dir.py` → `tests/test_globs.py` | [`rules/frontmatter-and-rules-dir.md`](rules/frontmatter-and-rules-dir.md) |
@@ -43,7 +44,7 @@ One package, `src/rigcheck/`, built with `uv_build` (`pyproject.toml`); lint ban
 - **`report`** (`src/rigcheck/report/`): owns output: `terminal.py`, `json.py` (`SCHEMA_VERSION` 1) and `budget.py`, the context budget, which is a report and not a rule.
 - **`cli`** (`cli.py`): owns the `rigcheck check` command; it wires `discover`, `engine` and `report` and sets the exit status (0, 1 with a finding at or above `--fail-on`, 2 on a usage error).
 
-The rules module `duplication.py` is a docstring-only stub; the config helpers it will use are in `src/rigcheck/rules/config.py`. What is planned is in Linear (team RIG), snapshot in [`plans/MAIN.md`](plans/MAIN.md).
+What is planned is in Linear (team RIG), snapshot in [`plans/MAIN.md`](plans/MAIN.md).
 
 ## Integration Footguns
 
