@@ -110,14 +110,14 @@ def _remote(variable: str) -> dict[str, object]:
 
 def test_credential_reports_header(workspace: Workspace) -> None:
     expected = [
-        "server `api` references `ANTHROPIC_AUTH_TOKEN` in its headers; Claude Code reads that credential as empty there, so the server gets none"
+        "server `api` references `ANTHROPIC_AUTH_TOKEN` in its headers; Claude Code reads that variable as empty there, so the server gets none"
     ]
     assert _messages(workspace, "mcp-credential-var-remote", _remote("ANTHROPIC_AUTH_TOKEN")) == expected
 
 
 def test_credential_reports_url(workspace: Workspace) -> None:
     servers = {"api": {"type": "sse", "url": "https://x.example/mcp?k=${ANTHROPIC_API_KEY}"}}
-    expected = ["server `api` references `ANTHROPIC_API_KEY` in its url; Claude Code reads that credential as empty there, so the server gets none"]
+    expected = ["server `api` references `ANTHROPIC_API_KEY` in its url; Claude Code reads that variable as empty there, so the server gets none"]
     assert _messages(workspace, "mcp-credential-var-remote", servers) == expected
 
 
@@ -138,12 +138,28 @@ def test_credential_stdio_silent(workspace: Workspace) -> None:
         ("ANTHROPIC_AUTH_TOKEN", True),
         ("AWS_BEARER_TOKEN_BEDROCK", True),
         ("AWS_SECRET_ACCESS_KEY", True),
-        ("AWS_ACCESS_KEY_ID", True),
         ("HTTPS_PROXY", True),
         ("NPM_TOKEN", True),
+        ("CLAUDE_CODE_OAUTH_TOKEN", True),
+        ("GOOGLE_APPLICATION_CREDENTIALS", True),
+        ("MCP_CLIENT_SECRET", True),
+        ("npm_token", True),
+        ("INPUT_NPM_TOKEN", True),
+        ("CARGO_REGISTRIES_MY_TOKEN", True),
+        ("OTEL_EXPORTER_OTLP_HEADERS", True),
+        ("GIT_CONFIG_VALUE_0", True),
+        ("ORG_GRADLE_PROJECT_PASSWORD", True),
+        ("BUNDLE_GEMS__EXAMPLE__COM", True),
+        ("AWS_ACCESS_KEY_ID", False),
+        ("ANTHROPIC_FOO_KEY", False),
         ("ANTHROPIC_BASE_URL", False),
         ("GITHUB_TOKEN", False),
+        ("GH_TOKEN", False),
+        ("HF_TOKEN", False),
         ("AWS_REGION", False),
+        ("ORG_GRADLE_PROJECT_VERSION", False),
+        ("BUNDLE_PATH__VENDOR", False),
+        ("GIT_CONFIG_COUNT", False),
     ],
 )
 def test_credential_names(workspace: Workspace, variable: str, *, fires: bool) -> None:

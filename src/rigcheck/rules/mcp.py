@@ -2,7 +2,7 @@
 
 A server's ``type`` must be one Claude Code accepts. A project ``.mcp.json`` must give
 ``${CLAUDE_PROJECT_DIR}`` a default in ``command`` and ``args``, and a remote server's ``url`` and
-``headers`` must not reference a credential variable, which Claude Code reads as empty there. A
+``headers`` must not reference a variable Claude Code reads as empty there. A
 git-tracked project file or a plugin config must not hold a credential literal in ``env``,
 ``headers``, ``args`` or ``url``, and the same server name defined in a project file and in
 ``~/.claude.json`` with a different endpoint is a conflict.
@@ -16,13 +16,13 @@ from rigcheck.parse import config
 from rigcheck.parse.secrets import SecretHit, find_secrets
 from rigcheck.rules import emit, rule
 from rigcheck.rules.config import McpServer, McpSource, mcp_servers
+from rigcheck.rules.mcp_credentials import remote_blanked
 
 _REFERENCE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(:-[^}]*)?\}")
 """A ``${NAME}`` or ``${NAME:-default}`` reference; a bare ``$NAME`` is not expanded in ``.mcp.json``."""
 
 _VALID_TYPES = frozenset({"stdio", "http", "streamable-http", "sse", "ws"})
 _REMOTE_TYPES = frozenset({"http", "streamable-http", "sse", "ws"})
-_CREDENTIALS = frozenset({"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "AWS_BEARER_TOKEN_BEDROCK", "HTTPS_PROXY", "NPM_TOKEN"})
 
 
 def _configured(rig: Rig) -> Iterator[tuple[McpServer, Mapping[str, object]]]:
@@ -109,16 +109,6 @@ def mcp_project_dir_no_default(rig: Rig) -> Iterator[Finding]:
             yield emit("mcp-project-dir-no-default", server.artifact, message, _key_line(rig, server, field))
 
 
-def _is_credential(name: str) -> bool:
-    if name in _CREDENTIALS:
-        return True
-    if name.startswith("ANTHROPIC_"):
-        return name.endswith(("_KEY", "_TOKEN"))
-    if name.startswith("AWS_"):
-        return name.endswith(("_KEY", "_KEY_ID", "_TOKEN"))
-    return False
-
-
 def _is_remote(value: Mapping[str, object]) -> bool:
     if "type" in value:
         kind = value["type"]
@@ -149,7 +139,7 @@ def _credential_references(value: Mapping[str, object]) -> list[tuple[str, str]]
     found: dict[tuple[str, str], None] = {}
     for field, text in _field_texts(value):
         for match in _REFERENCE.finditer(text):
-            if _is_credential(match.group(1)):
+            if remote_blanked(match.group(1)):
                 found.setdefault((field, match.group(1)))
     return list(found)
 
@@ -158,18 +148,19 @@ def _credential_references(value: Mapping[str, object]) -> list[tuple[str, str]]
     "mcp-credential-var-remote",
     "core",
     Severity.ERROR,
-    "Do not reference Claude Code or cloud-provider credentials in a remote server's url or headers; Claude Code reads them as empty there.",
+    "Do not reference a variable Claude Code blanks toward a remote server (its own and cloud credentials, tokens, proxies, "
+    "package indexes, telemetry) in the url or headers; the server receives an empty value.",
     ("official:MC3",),
 )
 def mcp_credential_var_remote(rig: Rig) -> Iterator[Finding]:
-    """A remote MCP server whose ``url`` or ``headers`` reference a credential variable, which Claude Code reads as empty."""
+    """A remote MCP server whose url or headers reference a variable Claude Code reads as empty there."""
     for server, value in _configured(rig):
         if not _is_remote(value):
             continue
         for field, variable in _credential_references(value):
             message = (
                 f"server `{server.name}` references `{variable}` in its {field}; "
-                "Claude Code reads that credential as empty there, so the server gets none"
+                "Claude Code reads that variable as empty there, so the server gets none"
             )
             yield emit("mcp-credential-var-remote", server.artifact, message, _key_line(rig, server, field))
 
