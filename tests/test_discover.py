@@ -8,7 +8,7 @@ import pytest
 
 from rigcheck import engine
 from rigcheck.discover import discover, encode_project, memory_dir
-from rigcheck.model import DEFAULT_WINDOW, Artifact, Kind, Layer, LoadClass, Rig
+from rigcheck.model import DEFAULT_WINDOW, Artifact, Kind, Layer, LoadClass, Rig, Suppression
 from rigcheck.rules import REGISTRY
 from support import Workspace, git_add, symlink_or_skip, write
 
@@ -516,3 +516,35 @@ def test_repo_docs_are_found_under_a_capitalized_docs_folder(workspace: Workspac
     write(repo / "Docs" / "b.md", "# Doc\n")
     git_add(repo, ["Docs/b.md"])
     assert _doc_names(discover(repo, workspace.home, DEFAULT_WINDOW)) == ["Docs/b.md"]
+
+
+def test_repo_rigcheck_toml_yields_suppressions(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    write(repo / "CLAUDE.md", "# Project\n")
+    config = write(repo / ".rigcheck.toml", '[[suppress]]\nrule = "a"\npath = "x/**"\nreason = "r"\n\n[[suppress]]\nrule = "b"\n')
+    rig = discover(repo, workspace.home, DEFAULT_WINDOW)
+    assert rig.suppressions == (Suppression("a", "x/**", "r", 1), Suppression("b", None, None, 6))
+    assert config not in {artifact.path for artifact in rig.artifacts}
+    assert rig.problems == ()
+
+
+def test_malformed_rigcheck_toml_is_a_problem_naming_the_file(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    config = write(repo / ".rigcheck.toml", "[[suppress]\n")
+    rig = discover(repo, workspace.home, DEFAULT_WINDOW)
+    assert rig.suppressions == ()
+    assert [problem for problem in rig.problems if str(config) in problem] == list(rig.problems)
+    assert len(rig.problems) == 1
+
+
+def test_repo_without_rigcheck_toml_has_no_suppressions(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    write(repo / "CLAUDE.md", "# Project\n")
+    assert discover(repo, workspace.home, DEFAULT_WINDOW).suppressions == ()
+
+
+def test_home_target_ignores_rigcheck_toml(workspace: Workspace) -> None:
+    write(workspace.home / ".rigcheck.toml", "[[suppress]]\n")
+    rig = discover(workspace.home, workspace.home, DEFAULT_WINDOW)
+    assert rig.suppressions == ()
+    assert rig.problems == ()

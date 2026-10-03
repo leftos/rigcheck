@@ -1,0 +1,4 @@
+[[suppress]]
+rule = "skill-description-missing"
+path = "plugins/legacy/**"
+reason = "vendored; fixed upstream"

@@ -14,5 +14,6 @@ One doc per rule area: what the area checks, its rule ids with severity and evid
 - [`mcp.md`](mcp.md): MCP server types, the variable references Claude Code does not expand in a server definition, credential literals in a shared config, and server names defined in more than one scope.
 - [`secrets.md`](secrets.md): credential literals in instruction, memory, skill, command and agent files, and skills and commands that pipe a downloaded script into a shell.
 - [`duplication.md`](duplication.md): instructions that two every-turn files, or an AGENTS.md peer, both state.
+- [`suppressions.md`](suppressions.md): the repo's `.rigcheck.toml` suppression entries, how they are read, and a suppression with no reason.
 
 `internal-error` belongs to the engine: a rule that raises becomes one `internal-error` finding and the other rules still run.
