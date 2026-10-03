@@ -119,6 +119,17 @@ def test_flat_plugin_mcp_file_yields_its_servers(workspace: Workspace) -> None:
     assert list(mcp_servers(_rig(repo, workspace))) == []
 
 
+def test_mcp_server_path_wrapped_and_flat(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    write(repo / ".claude" / "settings.json", json.dumps({"enabledPlugins": {PLUGIN: True}}))
+    install = _install(workspace)
+    write(repo / ".mcp.json", json.dumps({"mcpServers": {"x": {"command": "npx"}}}))
+    write(install / ".mcp.json", json.dumps({"x": {"type": "http", "url": "https://x"}}))
+
+    paths = {server.source: server.path for server in mcp_servers(_rig(repo, workspace))}
+    assert paths == {McpSource.REPO_FILE: ("mcpServers", "x"), McpSource.PLUGIN_FILE: ("x",)}
+
+
 def test_hook_map_line_points_at_the_hooks_key(workspace: Workspace) -> None:
     repo = workspace.rig()
     write(repo / ".claude" / "settings.json", '{\n  "enabledPlugins": {},\n  "hooks": {"Stop": []}\n}\n')
