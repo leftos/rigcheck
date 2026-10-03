@@ -6,7 +6,7 @@ from typing import TextIO
 
 from rigcheck import __version__
 from rigcheck.engine import count_by_severity
-from rigcheck.model import Finding, Layer, LoadClass, Rig, Severity
+from rigcheck.model import Finding, Layer, LoadClass, Rig, Severity, Suppressed
 from rigcheck.report.budget import Budget, Listing, window_label
 
 _COLORS = {Severity.ERROR: "\x1b[31m", Severity.WARN: "\x1b[33m", Severity.INFO: "\x1b[36m"}
@@ -101,12 +101,13 @@ def _group_lines(rig: Rig, findings: list[Finding], color: bool) -> list[str]:
     return lines
 
 
-def render(rig: Rig, findings: list[Finding], budget: Budget, *, color: bool) -> str:
+def render(rig: Rig, findings: list[Finding], suppressed: list[Suppressed], budget: Budget, *, color: bool) -> str:
     """Render the context budget and ranked findings as text, findings grouped by layer.
 
     Args:
         rig: The rig the findings are about.
         findings: Ranked findings.
+        suppressed: Findings a ``.rigcheck.toml`` entry silenced; only their count is shown, in the footer.
         budget: The rig's context budget, shown at the top.
         color: Whether to color severities and over-budget markers with ANSI codes.
 
@@ -116,5 +117,8 @@ def render(rig: Rig, findings: list[Finding], budget: Budget, *, color: bool) ->
     lines = [f"rigcheck {__version__} — {rig.target.as_posix()}", "", *_budget_lines(rig, budget, color)]
     lines.extend(_group_lines(rig, findings, color))
     counts = count_by_severity(findings)
-    lines.extend(["", f"{counts[Severity.ERROR]} errors · {counts[Severity.WARN]} warnings · {counts[Severity.INFO]} info"])
+    footer = f"{counts[Severity.ERROR]} errors · {counts[Severity.WARN]} warnings · {counts[Severity.INFO]} info"
+    if suppressed:
+        footer += f" · {len(suppressed)} suppressed"
+    lines.extend(["", footer])
     return "\n".join(lines) + "\n"

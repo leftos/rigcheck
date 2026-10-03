@@ -14,6 +14,13 @@ Checks the setup Claude Code loads for `PATH` (default: the current directory): 
 
 `--only ID[,ID...]` reports only the findings of those rule ids (the other rules still run; an unknown id exits 2 and names the closest ids). `--fail-on error|warn|info` sets the lowest finding severity that makes the exit status 1 (default `error`). Exit status: 0 clean, 1 a finding at or above `--fail-on`, 2 a usage error. Repo docs (`docs/**/*.md` and `Docs/**/*.md`, without `plans/` or `archive/` folders) are discovered as kind `doc`. A line containing `<!-- rigcheck: allow reference-path-missing -->` silences that rule on the line and the next.
 
+A `.rigcheck.toml` at the repo root silences findings the repo has judged not to apply. Each `[[suppress]]` entry names one `rule` id, an optional `path` glob relative to the repo root (for example `docs/**`), and a `reason`. A suppressed finding is left out of the findings and the exit status. The text report's last line adds `· N suppressed`, and `--format json` lists them under `suppressed` (each finding's fields plus `reason`) and counts them in `summary.suppressed`. `--only` filters them too.
+
+Some findings are never suppressed:
+- findings in `~/.claude`, plugins and memory, and in files outside the repo root;
+- `internal-error` and `discovery-error`;
+- the two suppression rules themselves. An entry with no reason is `suppression-no-reason` (warn), and one that matches nothing is `suppression-unused` (info).
+
 ## Development
 
 Requires [uv](https://docs.astral.sh/uv/) and Python 3.13.

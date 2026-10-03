@@ -1,0 +1,4 @@
+[[suppress]]
+rule = "reference-path-missing"
+path = "CLAUDE.md"
+reason = "the guide moves in the next release"

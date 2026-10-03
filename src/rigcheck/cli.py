@@ -8,7 +8,7 @@ from pathlib import Path
 
 from rigcheck import __version__, engine
 from rigcheck.discover import discover
-from rigcheck.model import DEFAULT_WINDOW, Severity
+from rigcheck.model import DEFAULT_WINDOW, Finding, Outcome, Severity, Suppressed
 from rigcheck.report import budget, terminal
 from rigcheck.report import json as json_report
 from rigcheck.rules import REGISTRY
@@ -90,6 +90,16 @@ def parse_window(value: str) -> int:
     return int(match[1]) * _WINDOW_MULTIPLIERS[match[2].lower()]
 
 
+def _select(outcome: Outcome, only: frozenset[str] | None) -> tuple[list[Finding], list[Suppressed]]:
+    """Return the kept and suppressed findings of the ``--only`` rules, or all of them without ``--only``."""
+    if only is None:
+        return outcome.findings, outcome.suppressed
+    # A selected rule that raised is reported as internal-error, so that id is always kept.
+    findings = [finding for finding in outcome.findings if finding.rule_id in only or finding.rule_id == "internal-error"]
+    suppressed = [entry for entry in outcome.suppressed if entry.finding.rule_id in only]
+    return findings, suppressed
+
+
 def _check(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     target = (args.path or Path.cwd()).resolve()
     if not target.is_dir():
@@ -100,15 +110,12 @@ def _check(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         if not sibling.is_dir():
             parser.error(f"--sibling is not a directory: {sibling}")
     rig = discover(target, home, args.window, siblings=siblings)
-    findings = engine.run(rig, REGISTRY.values())
-    if args.only is not None:
-        # A selected rule that raised is reported as internal-error, so that id is always kept.
-        findings = [finding for finding in findings if finding.rule_id in args.only or finding.rule_id == "internal-error"]
+    findings, suppressed = _select(engine.apply_suppressions(rig, engine.run(rig, REGISTRY.values())), args.only)
     report = budget.compute(rig)
     if args.format == "json":
-        output = json_report.render(rig, findings, report)
+        output = json_report.render(rig, findings, suppressed, report)
     else:
-        output = terminal.render(rig, findings, report, color=terminal.use_color(sys.stdout))
+        output = terminal.render(rig, findings, suppressed, report, color=terminal.use_color(sys.stdout))
     reconfigure = getattr(sys.stdout, "reconfigure", None)
     if reconfigure is not None:
         reconfigure(encoding="utf-8", errors="replace")

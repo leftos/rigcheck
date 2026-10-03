@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from rigcheck.parse.globs import bracket_error, matches_any, matches_on_disk, over_budget, rule_patterns
+from rigcheck.parse.globs import bracket_error, matches_any, matches_on_disk, matches_path, over_budget, rule_patterns
 from support import write
 
 FILES = frozenset({"src/app.ts", ".github/workflows/ci.yml", "docs/a.md"})
@@ -71,6 +71,20 @@ def test_over_budget(patterns: list[str], over: bool) -> None:
 )
 def test_matches_any(pattern: str, matched: bool) -> None:
     assert matches_any(pattern, FILES) is matched
+
+
+@pytest.mark.parametrize(
+    ("pattern", "name", "matched"),
+    [
+        pytest.param("docs/**", "docs/deep/guide.md", True, id="globstar"),
+        pytest.param("docs/**", "src/guide.md", False, id="other-folder"),
+        pytest.param("./docs/*.md", "docs/guide.md", True, id="leading-dot-slash"),
+        pytest.param("docs", "docs/guide.md", False, id="bare-folder-name-is-a-file"),
+        pytest.param("docs", "docs", True, id="bare-name-matches-that-file"),
+    ],
+)
+def test_matches_path(pattern: str, name: str, matched: bool) -> None:
+    assert matches_path(pattern, name) is matched
 
 
 @pytest.mark.parametrize(
