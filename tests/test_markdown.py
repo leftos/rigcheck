@@ -1,6 +1,7 @@
 import pytest
+from markdown_it.token import Token
 
-from rigcheck.parse import frontmatter
+from rigcheck.parse import frontmatter, markdown
 from rigcheck.parse.markdown import Injection, Reference, find_imports, find_injections, find_references, prose_segments, strip_html_comments
 from rigcheck.parse.tokens import estimate
 
@@ -50,6 +51,55 @@ def test_frontmatter_cases() -> None:
     assert frontmatter.parse("---\n- a\n---\n").load_error is not None
     assert frontmatter.parse("---\nkey: [unclosed\n---\n").strict_error is not None
     assert frontmatter.parse("---\n---\n").data == {}
+
+
+def test_frontmatter_parsed_once_per_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    loads: list[str] = []
+    safe_load = frontmatter.yaml.safe_load
+
+    def counting(stream: str) -> object:
+        loads.append(stream)
+        return safe_load(stream)
+
+    monkeypatch.setattr(frontmatter.yaml, "safe_load", counting)
+    text = "---\nname: once\n---\nBody\n"
+    assert frontmatter.parse(text) == frontmatter.parse(text)
+    assert len(loads) == 1
+
+
+def test_markdown_parsed_once_per_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    parse = markdown._PARSER.parse
+
+    def counting(src: str) -> list[Token]:
+        calls.append(src)
+        return parse(src)
+
+    monkeypatch.setattr(markdown._PARSER, "parse", counting)
+    text = "# Title\n\nSee `a.md`, [b](b.md) and @c.md.\n\n!`date`\n"
+    find_references(text)
+    find_injections(text, 1)
+    prose_segments(text, 1)
+    find_imports(text)
+    assert len(calls) == 1
+
+
+def test_markdown_with_comments_parsed_at_most_twice(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    parse = markdown._PARSER.parse
+
+    def counting(src: str) -> list[Token]:
+        calls.append(src)
+        return parse(src)
+
+    monkeypatch.setattr(markdown._PARSER, "parse", counting)
+    text = "# Title\r\n\r\n<!-- note @hidden.md -->\r\n\r\nSee `a.md` and @c.md.\r\n\r\n!`date`\r\n"
+    find_references(text)
+    find_imports(text)
+    find_injections(text, 1)
+    prose_segments(text, 1)
+    find_references(text)
+    assert len(calls) <= 2
 
 
 def _probe_text(lines: list[str], eol: str, bom: bool) -> str:
