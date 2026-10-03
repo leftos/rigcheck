@@ -12,16 +12,29 @@
   - [x] RIG-34 M5a: read .rigcheck.toml suppressions and the suppression rules
   - [x] RIG-35 M5b: apply suppressions in the engine and report them
   - [x] RIG-36 M5c: pack plumbing: advice and house packs, --packs
-  - [ ] RIG-37 M5d: advice rules for instruction files (CM1, CM4, CM8-12, PR4)
+  - [x] RIG-37 M5d: advice rules for instruction files (CM1, CM4, CM8-12, PR4)
   - [ ] RIG-38 M5e: advice rules for skills and agents (SK6, SK9, SK12-14, SK18, AG10)
   - [ ] RIG-39 M5f: advice rules for rules, memory and prompts (RL5, MM2, PR10)
-  - [ ] RIG-40 M5g: explain and rules commands
-  - [ ] RIG-41 M5h: brief command (Markdown fix brief)
-- [ ] RIG-7 M6: --deep checks via claude -p
+  - [x] RIG-40 M5g: explain and rules commands
+  - [x] RIG-41 M5h: brief command (Markdown fix brief)
+
+## M6 deep checks
+
+- [/] RIG-7 M6: --deep checks via claude -p
+  - [ ] RIG-44 M6a: deep runner, cache, --deep flag and consent listing
+  - [ ] RIG-45 M6b: deep pack and rule plumbing with canned verdicts
+  - [ ] RIG-46 M6c: deep checks for vague directives and bare prohibitions (CM6, PR2)
+  - [ ] RIG-47 M6d: deep checks for skills and agents (SK5, SK20, AG7)
+  - [ ] RIG-48 M6e: deep checks across the loaded set (CM7, paraphrased duplicates)
+  - [ ] RIG-49 M6f: human-read real --deep run and docs
+
+## M7 house pack and skill
+
 - [ ] RIG-8 M7: house pack, the rigcheck Claude Code skill, install docs
 
 ## Backlog
 
+- [x] RIG-42 Fix two stale lines in docs/plans/v1.md (exit code 2, runtime deps)
 - [ ] RIG-9 Make rigcheck check itself clean: 12 reference-path-missing in docs/research
 - [ ] RIG-10 Probe how ~/.claude.json keys projects for a session in a git worktree
 - [ ] RIG-11 shell.py _operand reads `bash -o` and `uv run --with` values as the script
@@ -33,5 +46,4 @@
 - [ ] RIG-26 Report injected commands likely to exit non-zero (SK22)
 - [ ] RIG-27 Check CLAUDE_PROJECT_DIR defaults in ~/.claude.json MCP servers
 - [ ] RIG-30 secret-literal misses a token written as a ${VAR:-default}
-- [ ] RIG-42 Fix two stale lines in docs/plans/v1.md (exit code 2, runtime deps)
 - [ ] RIG-43 Verify review findings on duplicate-line's local and shared files (a40932b)
