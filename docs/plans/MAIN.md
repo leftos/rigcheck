@@ -4,21 +4,33 @@
 
 ## M4 config rules
 
-- [x] RIG-3 M4k: skill injections not covered by allowed-tools (SK22)
-- [ ] RIG-4 M4i: MCP rules in rules/mcp.py (MC1, MC3–6)
+- [x] RIG-33 duplicate-line: stop comparing user-layer files with repo files
+- [x] RIG-28 Confirm which credential variables Claude Code blanks in remote MCP url/headers
+- [x] RIG-5 M4j: duplicate-line (info) across every-turn files
+- [x] RIG-4 M4i: MCP rules in rules/mcp.py (MC1, MC3–6)
   - [x] RIG-24 M4i-a: mcp-type-invalid, mcp-project-dir-no-default, mcp-credential-var-remote (MC3-5)
-  - [ ] RIG-25 M4i-b: mcp-secret-literal, mcp-server-conflict (MC1, MC6)
-- [ ] RIG-5 M4j: duplicate-line (info) across every-turn files
-- [ ] RIG-28 Confirm which credential variables Claude Code blanks in remote MCP url/headers
+  - [x] RIG-25 M4i-b: mcp-secret-literal, mcp-server-conflict (MC1, MC6)
+- [x] RIG-3 M4k: skill injections not covered by allowed-tools (SK22)
+- [ ] RIG-29 Report always-blanked credential variables in stdio MCP command, args and env
 
 ## M5 to M7 CLI surface and packs
 
 - [ ] RIG-6 M5: suppressions, advice pack, explain, brief
+  - [ ] RIG-34 M5a: read .rigcheck.toml suppressions and the suppression rules
+  - [ ] RIG-35 M5b: apply suppressions in the engine and report them
+  - [ ] RIG-36 M5c: pack plumbing: advice and house packs, --packs
+  - [ ] RIG-37 M5d: advice rules for instruction files (CM1, CM4, CM8-12, PR4)
+  - [ ] RIG-38 M5e: advice rules for skills and agents (SK6, SK9, SK12-14, SK18, AG10)
+  - [ ] RIG-39 M5f: advice rules for rules, memory and prompts (RL5, MM2, PR10)
+  - [ ] RIG-40 M5g: explain and rules commands
+  - [ ] RIG-41 M5h: brief command (Markdown fix brief)
 - [ ] RIG-7 M6: --deep checks via claude -p
 - [ ] RIG-8 M7: house pack, the rigcheck Claude Code skill, install docs
 
 ## Backlog
 
+- [x] RIG-32 Parse each file once: cache markdown and frontmatter parses, no regex per code span
+- [x] RIG-31 Smoke once per item before landing, and measure an --only filter for smoke.sh
 - [x] RIG-23 Per-commit message files and measured gate ceilings in the nextup profile
 - [x] RIG-22 Add the agent-mail-guard prek hook
 - [x] RIG-21 Commit the synced gate launcher (tools/gate.ps1)
@@ -32,3 +44,5 @@
 - [ ] RIG-16 Warn when the every-turn instruction files pass a size threshold
 - [ ] RIG-26 Report injected commands likely to exit non-zero (SK22)
 - [ ] RIG-27 Check CLAUDE_PROJECT_DIR defaults in ~/.claude.json MCP servers
+- [ ] RIG-30 secret-literal misses a token written as a ${VAR:-default}
+- [ ] RIG-42 Fix two stale lines in docs/plans/v1.md (exit code 2, runtime deps)
