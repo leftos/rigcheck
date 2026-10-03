@@ -1,7 +1,10 @@
+import re
+
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from markdown_it.token import Token
 
-from rigcheck.parse import frontmatter
+from rigcheck.parse import frontmatter, markdown
 from rigcheck.parse.markdown import find_imports, find_injections, find_references, is_candidate, prose_segments, strip_html_comments
 
 PATH_CHARS = st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789-", min_size=1, max_size=8)
@@ -110,6 +113,37 @@ def test_every_returned_raw_satisfies_the_candidate_rule(text: str) -> None:
 def test_find_injections_never_raises(text: str, start_line: int) -> None:
     for injection in find_injections(text, start_line):
         assert injection.line >= start_line
+
+
+TICKS = st.sampled_from(["`", "``", "```"])
+SPAN_PIECES = st.one_of(
+    st.sampled_from(["`", "``", "```", " ", "\n", "a", "b", "!", "[", "]", "(x)", "![", "\\"]),
+    st.builds(lambda ticks, inner: ticks + inner + ticks, TICKS, st.text(alphabet="a `\n", max_size=6)),
+)
+
+
+def _oracle_span_match(source: str, cursor: int, span: Token) -> tuple[int, int] | None:
+    body = r"[ \n]".join(re.escape(part) for part in span.content.split(" "))
+    ticks = re.escape(span.markup)
+    match = re.compile(rf"(?<!`){ticks}[ \n]?{body}[ \n]?{ticks}(?!`)").search(source, cursor)
+    return match.span() if match is not None else None
+
+
+def _code_spans(text: str) -> list[tuple[str, Token]]:
+    found = []
+    for token in markdown._PARSER.parse(text):
+        for child in token.children or ():
+            spans = [child] if child.type == "code_inline" else [span for span in child.children or () if span.type == "code_inline"]
+            found.extend((token.content, span) for span in spans)
+    return found
+
+
+@settings(deadline=None)
+@given(st.lists(SPAN_PIECES, max_size=16).map("".join))
+def test_span_match_agrees_with_regex_oracle(text: str) -> None:
+    for source, span in _code_spans(text):
+        for cursor in range(len(source) + 1):
+            assert markdown._span_match(source, cursor, span) == _oracle_span_match(source, cursor, span)
 
 
 @settings(deadline=None)

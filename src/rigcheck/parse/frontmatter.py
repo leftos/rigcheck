@@ -1,5 +1,6 @@
 """YAML frontmatter between ``---`` fences at the top of a Markdown file."""
 
+import functools
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -48,6 +49,8 @@ class Frontmatter:
 def parse(text: str) -> Frontmatter:
     """Parse the frontmatter block of ``text``; never raises.
 
+    The result is cached by ``text`` and shared between callers, so treat it, ``data`` and ``key_lines`` included, as read-only.
+
     Args:
         text: The whole file content.
 
@@ -55,6 +58,11 @@ def parse(text: str) -> Frontmatter:
         The frontmatter. An unclosed block or a non-mapping sets both errors; YAML that only Claude Code's retry
         reads sets ``strict_error`` alone.
     """
+    return _parse(text)
+
+
+@functools.cache
+def _parse(text: str) -> Frontmatter:
     raw = text.removeprefix(BOM).split("\n")
     lines = [line.removesuffix("\r") for line in raw]
     if lines[0] != FENCE:

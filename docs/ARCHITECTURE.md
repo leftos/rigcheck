@@ -48,6 +48,8 @@ What is planned is in Linear (team RIG), snapshot in [`plans/MAIN.md`](plans/MAI
 
 ## Integration Footguns
 
+- `frontmatter.parse` and the markdown token parse in `parse/markdown.py` are cached by text and shared across every rule and every file with the same text: a rule that mutates `Frontmatter.data`, `key_lines` or a token changes the input of every later rule, in an order-dependent way no test catches. Treat parse results as read-only; copy before changing.
+
 - Pytest's `--basetemp` cannot point into the repo's `.tmp/`: the fixture copies would then sit inside rigcheck's own git repo, and the git-dependent rules would see it instead of the fixture's.
 
 - **A new rules module** must be added to the import list at the bottom of `src/rigcheck/rules/__init__.py`; a module nothing imports never registers its rules, and no test fails for it.

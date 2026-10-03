@@ -152,7 +152,7 @@ def load(rig: Rig, artifact: Artifact) -> frontmatter.Frontmatter:
         artifact: The file to parse.
 
     Returns:
-        The parsed frontmatter, with no cache between calls.
+        The parsed frontmatter, cached by text and shared between callers, so read-only.
     """
     return frontmatter.parse(rig.text(artifact.path))
 

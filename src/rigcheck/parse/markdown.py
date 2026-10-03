@@ -1,5 +1,6 @@
 """Markdown helpers that follow Claude Code's handling of instruction files."""
 
+import functools
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -35,6 +36,16 @@ def _normalize(text: str) -> str:
     return _NEWLINES.sub("\n", text)
 
 
+@functools.cache
+def _parsed(text: str) -> tuple[Token, ...]:
+    return tuple(_PARSER.parse(text))
+
+
+def _tokens(text: str) -> tuple[Token, ...]:
+    """Return the block tokens of ``text`` with its newlines normalized, parsed once per text; callers must not change them."""
+    return _parsed(_normalize(text))
+
+
 def strip_html_comments(text: str) -> str:
     r"""Remove block-level HTML comments, as Claude Code does before injecting CLAUDE.md.
 
@@ -47,11 +58,15 @@ def strip_html_comments(text: str) -> str:
     Returns:
         The content with newlines normalized to ``\n`` and block-level comments removed.
     """
-    text = _normalize(text)
+    return _stripped(_normalize(text))
+
+
+@functools.cache
+def _stripped(text: str) -> str:
     if "<!--" not in text:
         return text
     lines = text.split("\n")
-    for token in _PARSER.parse(text):
+    for token in _tokens(text):
         if token.type != "html_block" or token.map is None or not token.content.lstrip().startswith("<!--"):
             continue
         start, end = token.map
@@ -123,15 +138,60 @@ class Reference:
     lang: str
 
 
-def _span_match(source: str, cursor: int, span: Token) -> re.Match[str] | None:
-    """Find ``span`` in the inline source from ``cursor``.
+_GAPS = ((1, 1), (1, 0), (0, 1), (0, 0))
+"""Whether a space or line break follows the opening backticks and precedes the closing ones, in the order tried."""
+
+
+def _gap(source: str, index: int) -> bool:
+    return source[index : index + 1] in (" ", "\n")
+
+
+def _body_at(source: str, index: int, content: str) -> bool:
+    """True when ``content`` stands in ``source`` at ``index``, each of its spaces allowed to be a line break there."""
+    written = source[index : index + len(content)]
+    if written == content:
+        return True
+    return len(written) == len(content) and all(have == want or (want == " " and have == "\n") for have, want in zip(written, content, strict=True))
+
+
+def _span_end(source: str, start: int, span: Token) -> int:
+    """Return the end of ``span``'s raw text when its opening backticks start at ``start``, or -1.
+
+    The backticks must not continue a longer run on either side. One space or line break may
+    stand inside each run of backticks; with both, one or none, the first layout that fits wins.
+    """
+    ticks, content = span.markup, span.content
+    if source[start - 1 : start] == "`":
+        return -1
+    opened = start + len(ticks)
+    for lead, trail in _GAPS:
+        close = opened + lead + len(content) + trail
+        end = close + len(ticks)
+        if lead and not _gap(source, opened):
+            continue
+        if trail and not _gap(source, close - 1):
+            continue
+        if _body_at(source, opened + lead, content) and source.startswith(ticks, close) and source[end : end + 1] != "`":
+            return end
+    return -1
+
+
+Range = tuple[int, int]
+
+
+def _span_match(source: str, cursor: int, span: Token) -> Range | None:
+    """Find ``span`` in the inline source from ``cursor``; return where its raw text starts and ends, or None.
 
     markdown-it turns a line break inside a code span into a space, so the span's raw text is
     matched in the source, where the break survives.
     """
-    body = r"[ \n]".join(re.escape(part) for part in span.content.split(" "))
-    ticks = re.escape(span.markup)
-    return re.compile(rf"(?<!`){ticks}[ \n]?{body}[ \n]?{ticks}(?!`)").search(source, cursor)
+    start = source.find(span.markup, cursor)
+    while start >= 0:
+        end = _span_end(source, start, span)
+        if end >= 0:
+            return start, end
+        start = source.find(span.markup, start + 1)
+    return None
 
 
 def _escaped(source: str, index: int) -> bool:
@@ -219,9 +279,6 @@ def _destination_end(source: str, index: int) -> int:
     return end + 1 if source.startswith(")", end) else end
 
 
-Range = tuple[int, int]
-
-
 class _SourceWalk:
     """Follows an inline token's children through its raw source, which keeps escapes and line breaks the tokens fold away."""
 
@@ -249,8 +306,8 @@ class _SourceWalk:
         match = _span_match(self.source, self.cursor, child)
         if match is None:
             return self.cursor, []
-        self.cursor = match.end()
-        return match.start(), [match.span()]
+        self.cursor = match[1]
+        return match[0], [match]
 
     def _html(self, child: Token) -> tuple[int, list[Range]]:
         start = self.source.find(child.content, self.cursor)
@@ -294,9 +351,9 @@ class _SourceWalk:
         inner = start + 2
         for span in child.children or ():
             match = _span_match(self.source, inner, span) if span.type == "code_inline" else None
-            if match is not None and match.end() <= end:
-                ranges.append(match.span())
-                inner = match.end()
+            if match is not None and match[1] <= end:
+                ranges.append(match)
+                inner = match[1]
         after = _destination_end(self.source, end + 1)
         self.cursor = after
         return start, [*ranges, (end, after)]
@@ -369,7 +426,7 @@ def find_references(text: str) -> list[Reference]:
         The references in document order, one per code span, link, image, or code block line.
     """
     found: list[Reference] = []
-    for token in _PARSER.parse(strip_html_comments(text)):
+    for token in _tokens(strip_html_comments(text)):
         if token.type == "inline" and token.map is not None and token.children:
             found.extend(_inline_references(token))
         elif token.type in ("fence", "code_block"):
@@ -450,7 +507,7 @@ def find_injections(text: str, start_line: int) -> list[Injection]:
         The injections in document order.
     """
     found: list[Injection] = []
-    for token in _PARSER.parse(_normalize(text)):
+    for token in _tokens(text):
         if not _from(token, start_line):
             continue
         if token.type == "inline" and token.children:
@@ -488,7 +545,7 @@ def prose_segments(text: str, start_line: int) -> list[tuple[int, str]]:
         ``(line, text)`` pairs in document order, one per source line of prose.
     """
     found: list[tuple[int, str]] = []
-    for token in _PARSER.parse(_normalize(text)):
+    for token in _tokens(text):
         if token.type == "inline" and token.map is not None and _from(token, start_line):
             first = token.map[0] + 1
             found.extend((first + index, line) for index, line in enumerate(_blank_spans(token).split("\n")))
@@ -509,7 +566,7 @@ def find_imports(text: str) -> list[Import]:
         The imports in document order.
     """
     found: list[Import] = []
-    for token in _PARSER.parse(_normalize(text)):
+    for token in _tokens(text):
         if token.type == "inline" and token.map is not None and token.children:
             found.extend(_inline_imports(token.children, token.map[0] + 1))
     return found
