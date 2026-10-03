@@ -53,6 +53,7 @@ The user's product decisions; a change to one is the user's call.
 - **Bundled file**: a file inside a skill's folder other than SKILL.md that Claude may be meant to read or run.
 - **AGENTS.md peer**: the repo's AGENTS.md beside a CLAUDE.md. Codex reads it; Claude Code reads it only through an `@AGENTS.md` import, so without one it is shadowed. Rules that compare instruction files include it either way.
 - **Near-duplicate**: two clauses in different files whose tokens overlap by at least 0.8 of the smaller clause, the larger at most twice the smaller; see [rules/duplication.md](rules/duplication.md).
+- **Null result**: a study that found no effect of what a piece of advice is about (file length, emphasis); an `advice` rule cites it so its finding is not read as a claim about adherence; see [rules/advice.md](rules/advice.md).
 - **Rule-area doc**: one file under `docs/rules/` per group of related rules, stating what each rule checks and the design it settles, with reasons; see [rules/README.md](rules/README.md).
 - **Suppression**: a per-repo config entry that silences a rule, globally or for a path; every suppression must carry a reason.
 - **Feature marker**: `branch: feat/<name>` in a Linear project's content; every item under it lands on the `feat/<name>` branch instead of `main` (user-level `nextup` §3, "Feature branches").
