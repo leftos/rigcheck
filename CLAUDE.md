@@ -21,7 +21,7 @@ prek install                                            # hooks: ruff, ty, actio
 
 Run test suites, the smoke and hook-running commits through the gate, `pwsh tools/gate.ps1 -Log .tmp/<name>.log -TimeoutSeconds <n> -Slot light|heavy -- <command…>` (`tools/gate.ps1` is the user-level gate's launcher; on a machine without the gate it runs the command at below-normal priority and still writes the log). The slots and timeouts per command are in the nextup profile's "Agents and gates".
 
-After a discovery or rule change, run the real-repo smoke: `pwsh tools/gate.ps1 -Log .tmp/smoke.log -TimeoutSeconds 700 -Slot light -- bash .claude/skills/rigcheck-nextup/smoke.sh` (counts only; fails on an `internal-error`).
+Before landing a discovery or rule change, once its review fixes are in, run the real-repo smoke: `pwsh tools/gate.ps1 -Log .tmp/smoke.log -TimeoutSeconds 700 -Slot light -- bash .claude/skills/rigcheck-nextup/smoke.sh` (counts only; fails on an `internal-error`).
 
 ## Structure
 
