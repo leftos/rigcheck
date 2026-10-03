@@ -12,4 +12,5 @@ hooks = [
   { id = "ty", name = "ty check", entry = "uv run ty check", language = "system", types = ["python"], pass_filenames = false },
   { id = "actionlint", name = "actionlint", entry = "actionlint", language = "system", files = "^\\.github/workflows/" },
   { id = "zizmor", name = "zizmor", entry = "zizmor", language = "system", files = "^\\.github/" },
+  { id = "agent-mail-guard", name = "agent-mail lease guard", entry = "pwsh -NoProfile -File tools/agent-mail-guard.ps1", language = "system", pass_filenames = true, stages = ["pre-commit"] },
 ]
