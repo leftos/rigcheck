@@ -41,9 +41,19 @@ def _append_secret(rig: Path) -> None:
     write(claude, claude.read_text(encoding="utf-8") + "ANTHROPIC_API_KEY=" + "sk-" + "ant-" + "api03-" + "a1B2c3D4" * 4 + "\n")
 
 
+def _append_mcp_secret(rig: Path) -> None:
+    """Write a pattern-valid token into the fixture's ``.mcp.json`` and re-stage it, so no committed file holds one."""
+    path = rig / ".mcp.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["mcpServers"]["api"]["headers"]["Authorization"] = "Bearer " + "ghp_" + "a1B2c3D4" * 5
+    write(path, json.dumps(data))
+    git_add(rig, [".mcp.json"])
+
+
 RUNTIME_SETUP: dict[tuple[str, str], Callable[[Path], None]] = {
     ("instructions-too-large", "bad"): _pad_past_limit,
     ("secret-literal", "bad"): _append_secret,
+    ("mcp-secret-literal", "bad"): _append_mcp_secret,
     ("unc-symlink", "bad"): _unc_link,
     ("rule-external-scoped", "bad"): lambda rig: _external_rule_link(rig, scoped=True),
     ("rule-external-scoped", "good"): lambda rig: _external_rule_link(rig, scoped=False),

@@ -38,6 +38,7 @@ The user's product decisions; a change to one is the user's call.
 - **Vendored schema**: the SchemaStore Claude Code settings schema, copied into `src/rigcheck/data/` at a pinned commit so the settings check runs offline; `scripts/update_schema.py` refreshes it.
 - **Permission rule**: one string in a settings file's `permissions.allow`, `ask` or `deny` list: a tool name, optionally with a specifier in parentheses (`Bash(git *)`, `Read(./.env)`).
 - **Specifier**: the part of a permission rule inside the parentheses: a command pattern for Bash, a path pattern for Read and Edit.
+- **MCP scope**: where an MCP server is defined: `local` (`~/.claude.json` under the repo's `projects` entry), `project` (the repo's `.mcp.json`) or `user` (`~/.claude.json` top level), in that order of precedence; plugin servers sit below them under the name `plugin:<plugin>:<server>`.
 - **Settings scope**: which settings file a rule or key comes from: `user` (`~/.claude/settings.json`), `project` (the repo's `.claude/settings.json`) or `local` (`settings.local.json` in the repo's `.claude` folder); Claude Code combines the permission lists of every scope.
 - **Managed settings**: the policy tier of settings Claude Code reads from the system managed-settings file or MDM; some keys are honored only there. rigcheck does not read it.
 - **Shadowed**: an allow rule that a deny or ask rule in any scope already matches, so it never applies (deny, then ask, then allow; the first match wins).
