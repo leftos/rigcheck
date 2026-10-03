@@ -1,15 +1,19 @@
-"""Rules for MCP server definitions: the transport type, and the variable references Claude Code does not expand.
+"""Rules for MCP server definitions: transport type, unexpanded references, credential literals and scope conflicts.
 
 A server's ``type`` must be one Claude Code accepts. A project ``.mcp.json`` must give
 ``${CLAUDE_PROJECT_DIR}`` a default in ``command`` and ``args``, and a remote server's ``url`` and
-``headers`` must not reference a credential variable, which Claude Code reads as empty there.
+``headers`` must not reference a credential variable, which Claude Code reads as empty there. A
+git-tracked project file or a plugin config must not hold a credential literal in ``env``,
+``headers``, ``args`` or ``url``, and the same server name defined in a project file and in
+``~/.claude.json`` with a different endpoint is a conflict.
 """
 
 import re
 from collections.abc import Iterator, Mapping
 
-from rigcheck.model import Finding, Rig, Severity
+from rigcheck.model import Finding, McpScope, Rig, Severity
 from rigcheck.parse import config
+from rigcheck.parse.secrets import SecretHit, find_secrets
 from rigcheck.rules import emit, rule
 from rigcheck.rules.config import McpServer, McpSource, mcp_servers
 
@@ -28,9 +32,20 @@ def _configured(rig: Rig) -> Iterator[tuple[McpServer, Mapping[str, object]]]:
             yield server, server.config
 
 
-def _key_line(rig: Rig, server: McpServer, key: str) -> int | None:
-    """Return the line of ``key`` inside the server's entry, or the server's own line."""
-    return config.key_line(rig.text(server.artifact.path), (*server.path, key)) or server.line
+def _key_line(rig: Rig, server: McpServer, *keys: str) -> int | None:
+    """Return the line of the deepest of ``keys`` the server's entry shows, or the server's own line.
+
+    Args:
+        rig: The discovered setup.
+        server: The server whose entry is searched.
+        *keys: The key path below the server's own path, outermost first.
+    """
+    text = rig.text(server.artifact.path)
+    for depth in range(len(keys), 0, -1):
+        line = config.key_line(text, (*server.path, *keys[:depth]))
+        if line is not None:
+            return line
+    return server.line
 
 
 def _type_problem(name: str, value: object) -> str | None:
@@ -111,16 +126,22 @@ def _is_remote(value: Mapping[str, object]) -> bool:
     return "url" in value
 
 
+def _string_values(value: object) -> Iterator[tuple[str, str]]:
+    """Yield each string value of a JSON object under its string key, in written order."""
+    if not isinstance(value, dict):
+        return
+    for key, item in value.items():
+        if isinstance(key, str) and isinstance(item, str):
+            yield key, item
+
+
 def _field_texts(value: Mapping[str, object]) -> Iterator[tuple[str, str]]:
     """Yield ``(field, text)`` for the ``url`` and each string header value."""
     url = value.get("url")
     if isinstance(url, str):
         yield "url", url
-    headers = value.get("headers")
-    if isinstance(headers, dict):
-        for header in headers.values():
-            if isinstance(header, str):
-                yield "headers", header
+    for _header, text in _string_values(value.get("headers")):
+        yield "headers", text
 
 
 def _credential_references(value: Mapping[str, object]) -> list[tuple[str, str]]:
@@ -151,3 +172,137 @@ def mcp_credential_var_remote(rig: Rig) -> Iterator[Finding]:
                 "Claude Code reads that credential as empty there, so the server gets none"
             )
             yield emit("mcp-credential-var-remote", server.artifact, message, _key_line(rig, server, field))
+
+
+def _args_text(value: object) -> str | None:
+    """Return a server's ``args`` string items joined for scanning, or None when it holds none."""
+    if not isinstance(value, list):
+        return None
+    items = [item for item in value if isinstance(item, str)]
+    return "\n".join(items) or None
+
+
+def _scanned_leaves(value: Mapping[str, object]) -> Iterator[tuple[str, str, tuple[str, ...], str]]:
+    """Yield ``(field, where, keys, text)`` for every string leaf the literal scan reads, in reporting order.
+
+    ``keys`` is the key path below the field: the entry key of one ``env`` or ``headers`` value, and
+    empty for the single ``command``, ``args`` and ``url`` leaves. The ``args`` items are one leaf,
+    so a server reports at most one finding for the whole list.
+    """
+    for key, text in _string_values(value.get("env")):
+        yield "env", f"`env.{key}`", (key,), text
+    for key, text in _string_values(value.get("headers")):
+        yield "headers", f"`headers.{key}`", (key,), text
+    command = value.get("command")
+    if isinstance(command, str):
+        yield "command", "`command`", (), command
+    args = _args_text(value.get("args"))
+    if args is not None:
+        yield "args", "`args`", (), args
+    url = value.get("url")
+    if isinstance(url, str):
+        yield "url", "`url`", (), url
+
+
+def _leaf_hit(text: str) -> SecretHit | None:
+    """Return the first credential literal in a leaf, or the first one inside a ``${VAR:-default}`` it writes.
+
+    ``find_secrets`` refuses a literal that follows a ``-``, as the ``:-`` of a default does, so a
+    leaf whose text holds no hit on its own has each default body scanned by itself.
+    """
+    hits = find_secrets(text)
+    if hits:
+        return hits[0]
+    for match in _REFERENCE.finditer(text):
+        default = match.group(2)
+        if default is None or default == ":-":
+            continue
+        found = find_secrets(default[2:])
+        if found:
+            return found[0]
+    return None
+
+
+def _scan_for_literals(rig: Rig, server: McpServer) -> bool:
+    """True when the rule reads this server: a plugin config always, a repo file only when git tracks it."""
+    if server.source is not McpSource.REPO_FILE:
+        return True
+    return rig.is_tracked(server.artifact.path)
+
+
+@rule(
+    "mcp-secret-literal",
+    "core",
+    Severity.ERROR,
+    "Replace the literal with a ${VAR} reference and set the variable in the environment; "
+    "a committed or shipped .mcp.json is read by everyone who has it. In an installed plugin, "
+    "report it to the plugin's author.",
+    ("official:MC1",),
+)
+def mcp_secret_literal(rig: Rig) -> Iterator[Finding]:
+    """A git-tracked project ``.mcp.json`` or a plugin's MCP config that holds a credential literal.
+
+    The literal may be in ``env``, ``headers``, ``args``, ``command`` or ``url``.
+    """
+    for server, value in _configured(rig):
+        if not _scan_for_literals(rig, server):
+            continue
+        for field, where, keys, text in _scanned_leaves(value):
+            hit = _leaf_hit(text)
+            if hit is None:
+                continue
+            message = f"{hit.kind} literal ({hit.length} characters) in {where} of server `{server.name}`; the value is not shown"
+            yield emit("mcp-secret-literal", server.artifact, message, _key_line(rig, server, field, *keys))
+
+
+def _endpoint(value: Mapping[str, object]) -> tuple[object, ...]:
+    """Return a server's endpoint as written: its ``url``, or its ``command`` and ``args``."""
+    if "url" in value:
+        return ("url", value["url"])
+    args = value.get("args")
+    items = tuple(args) if isinstance(args, list) else ()
+    return ("command", value.get("command"), items)
+
+
+def _conflicting_scopes(rig: Rig, name: str, endpoint: tuple[object, ...]) -> list[str]:
+    """Return the home scopes declaring ``name`` with a different endpoint, local scope first."""
+    scopes: list[str] = []
+    for scope in (McpScope.LOCAL, McpScope.USER):
+        for home_server in rig.user_mcp_servers:
+            if home_server.scope is not scope or home_server.name != name:
+                continue
+            if not isinstance(home_server.config, dict):
+                continue
+            if _endpoint(home_server.config) != endpoint:
+                scopes.append(scope.value)
+                break
+    return scopes
+
+
+def _has_local_scope(rig: Rig, name: str) -> bool:
+    """True when ``~/.claude.json`` declares a local-scope server of this name, whatever its endpoint and fields."""
+    return any(server.scope is McpScope.LOCAL and server.name == name and isinstance(server.config, dict) for server in rig.user_mcp_servers)
+
+
+@rule(
+    "mcp-server-conflict",
+    "core",
+    Severity.WARN,
+    "Keep one definition of the server and remove the others with claude mcp remove <name> --scope <scope>; "
+    "Claude Code loads only the highest-precedence one.",
+    ("official:MC6",),
+)
+def mcp_server_conflict(rig: Rig) -> Iterator[Finding]:
+    """A project ``.mcp.json`` server whose name a user- or local-scope server in ``~/.claude.json`` also defines with a different endpoint."""
+    for server, value in _configured(rig):
+        if server.source is not McpSource.REPO_FILE:
+            continue
+        scopes = _conflicting_scopes(rig, server.name, _endpoint(value))
+        if not scopes:
+            continue
+        winner = "local" if _has_local_scope(rig, server.name) else "project"
+        message = (
+            f"server `{server.name}` is also defined in {' and '.join(scopes)} scope in ~/.claude.json "
+            f"with a different endpoint; Claude Code loads the {winner} scope definition"
+        )
+        yield emit("mcp-server-conflict", server.artifact, message, server.line)
