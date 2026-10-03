@@ -29,6 +29,7 @@ The user's product decisions; a change to one is the user's call.
 - **Pack**: a named set of rules. `core` holds rules backed by official documentation or graded evidence; `house` holds opinionated conventions and is off unless enabled.
 - **Deep check**: an opt-in check (`--deep`) that asks Claude, through headless `claude -p`, to judge what code cannot: contradictions, reworded duplicates, vague instructions.
 - **Fix brief**: a Markdown file rigcheck writes that an agent can execute to fix a set of findings. rigcheck never edits the checked files itself.
+- **Covered**: a command is covered when a permission allow rule matches it, as Claude Code matches `Bash(...)` specifiers: each subcommand of a compound command on its own. `skill-injection-not-allowed` reports injected commands that nothing covers.
 - **Frontmatter retry**: Claude Code's second parse of a frontmatter block that strict YAML rejects: it re-quotes unquoted values holding `: ` or a YAML indicator and parses again; rigcheck reproduces it, so `data` is what Claude Code loads ([research/frontmatter-probe.md](research/frontmatter-probe.md)).
 - **Hook map**: one `hooks` object rigcheck reads, from settings, a plugin's `hooks/hooks.json` or `plugin.json`, or skill, command or agent frontmatter: hook event names, each with a list of matcher groups.
 - **Matcher group**: one entry under a hook event: an optional `matcher` (a tool name, a `|` list of exact names, or a regex) and the `hooks` list of handlers it runs.

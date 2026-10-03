@@ -6,10 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from rigcheck.model import Artifact, Finding, Kind, Rig, Severity
-from rigcheck.parse import shell
+from rigcheck.parse import frontmatter, shell
 from rigcheck.parse.markdown import Injection, find_injections, prose_segments
+from rigcheck.parse.permissions import PermissionRule, bash_covers, parse_rule
 from rigcheck.rules import emit, rule
-from rigcheck.rules.components import components, load
+from rigcheck.rules.components import components, load, tool_entries
+from rigcheck.rules.permissions import settings_allow_rules
 from rigcheck.rules.references import exists, inside, resolved
 from rigcheck.rules.skills import LISTED_KINDS
 
@@ -168,3 +170,163 @@ def skill_argument_unused(rig: Rig) -> Iterator[Finding]:
             if not _used(name, body):
                 message = f'arguments declares "{name}", but the body never uses ${name}'
                 yield emit("skill-argument-unused", artifact, message, parsed.key_lines.get("arguments", 1))
+
+
+_UNREADABLE = ("$(", "`", "<<", ">|")
+"""Text in a line that this lexical pass cannot read past: a substitution, a here-document or a clobber redirection."""
+
+_ESCAPE = re.compile(r"\\[&|;\"']")
+"""A backslash escaping a separator or quote, which moves where one command ends."""
+
+_COMPOUND = frozenset({"!", "if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case", "esac", "function", "select"})
+"""Words that open or continue a compound command or negate a pipeline, whose subcommands this pass cannot read."""
+
+_WRAPPERS = frozenset({"timeout", "time", "nice", "nohup", "stdbuf", "command", "builtin", "noglob", "xargs"})
+"""Commands that run the command named after them, so the wrapper's own text is not the command that runs."""
+
+_VARIABLE = re.compile(r"\$[A-Za-z0-9_{]")
+"""A shell variable or Claude Code placeholder, whose value the text does not resolve."""
+
+
+def _redirection(piece: str, index: int) -> bool:
+    """True when the ``&`` at ``index`` belongs to a ``>&``, ``<&`` or ``&>`` redirection rather than backgrounding the command."""
+    if index and piece[index - 1] in "<>":
+        return True
+    return index + 1 < len(piece) and piece[index + 1] == ">"
+
+
+def _background(piece: str) -> list[str]:
+    """Split one shell piece on a background ``&`` outside quotes; a redirection's ``&`` is part of the piece."""
+    parts: list[str] = []
+    current = ""
+    quote = ""
+    for index, char in enumerate(piece):
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char in "\"'":
+            quote = char
+        elif char == "&" and not _redirection(piece, index):
+            parts.append(current)
+            current = ""
+            continue
+        current += char
+    parts.append(current)
+    return parts
+
+
+def _subcommands(line: str) -> list[str]:
+    """Split one command line into the subcommands a shell would run, each stripped, empty pieces dropped."""
+    found: list[str] = []
+    for piece in shell.segments(shell.uncommented(line)):
+        for part in _background(piece):
+            command = part.strip()
+            if command:
+                found.append(command)
+    return found
+
+
+def _group(command: str) -> bool:
+    """True when a subcommand is a shell group or a compound-command keyword, which this pass cannot read."""
+    if command.startswith(("(", "{")):
+        return True
+    words = shell.words(command)
+    return bool(words) and words[0] in _COMPOUND
+
+
+def _line_unreadable(line: str) -> bool:
+    """True when one line holds syntax whose subcommands this lexical pass cannot read."""
+    if any(marker in line for marker in _UNREADABLE) or _ESCAPE.search(line) is not None:
+        return True
+    if line.rstrip().endswith(("\\", "&&", "||")):
+        return True
+    return any(_group(command) for command in _subcommands(line))
+
+
+def _readable(lines: list[str]) -> bool:
+    """True when every line of an injected command can be split into subcommands."""
+    return not any(_line_unreadable(line) for line in lines)
+
+
+def _skipped(command: str) -> bool:
+    """True when a subcommand is not checked as written: an assignment word, a wrapper, or a variable the text leaves unexpanded."""
+    if _VARIABLE.search(command) is not None:
+        return True
+    words = shell.words(command)
+    return bool(words) and (shell.ASSIGNMENT.match(words[0]) is not None or words[0] in _WRAPPERS)
+
+
+def _covered(entries: list[PermissionRule], command: str) -> bool:
+    """True when one of the component's ``Bash`` rules covers ``command``."""
+    return any(found.specifier is None or bash_covers(found.specifier, command) for found in entries)
+
+
+def _uncovered_line(line: str, entries: list[PermissionRule]) -> str | None:
+    """Return the program of the first subcommand of one line that no ``Bash`` rule covers."""
+    for command in _subcommands(line):
+        if _skipped(command) or _covered(entries, command):
+            continue
+        words = shell.words(command)
+        return words[0] if words else command
+    return None
+
+
+def _uncovered(injection: Injection, entries: list[PermissionRule]) -> tuple[int, str] | None:
+    """Return the line and program of the first subcommand of an injection that no ``Bash`` rule covers."""
+    lines = injection.command.split("\n")
+    if not _readable(lines):
+        return None
+    for index, line in enumerate(lines):
+        program = _uncovered_line(line, entries)
+        if program is not None:
+            return injection.line + index, program
+    return None
+
+
+def _bash_rules(rules: list[PermissionRule]) -> list[PermissionRule]:
+    """Return the ``Bash`` rules of a parsed rule list."""
+    return [found for found in rules if found.tool == "Bash"]
+
+
+def _bash_entries(parsed: frontmatter.Frontmatter, settings: list[PermissionRule]) -> list[PermissionRule] | None:
+    """Return the ``Bash`` allow rules covering a skill or command, or None when this rule does not apply to it.
+
+    None when the frontmatter has no data, sets no ``allowed-tools``, or names a ``shell`` other than ``bash``
+    (a blank ``shell`` counts as bash); otherwise the component's own ``Bash`` rules plus ``settings``, the
+    repo and user settings allow rules, empty when neither names a ``Bash`` tool at all.
+    """
+    data = parsed.data
+    if data is None or "allowed-tools" not in data:
+        return None
+    if "shell" in data and data["shell"] not in (None, "", "bash"):
+        return None
+    own = (parse_rule(entry) for entry in tool_entries(data["allowed-tools"]))
+    return settings + _bash_rules([found for found in own if found is not None])
+
+
+@rule(
+    "skill-injection-not-allowed",
+    "core",
+    Severity.WARN,
+    "Add a Bash(<command> *) entry to allowed-tools for each injected command, or Claude Code aborts the invocation outside auto mode.",
+    ("official:SK22",),
+)
+def skill_injection_not_allowed(rig: Rig) -> Iterator[Finding]:
+    """An injected command that no Bash entry of the component's ``allowed-tools`` or of a settings allow rule covers.
+
+    Claude Code aborts the invocation outside auto mode, so add the entry that covers the command.
+    """
+    settings = _bash_rules(settings_allow_rules(rig))
+    for artifact in components(rig, LISTED_KINDS):
+        entries = _bash_entries(load(rig, artifact), settings)
+        if entries is None:
+            continue
+        for injection in _injections(rig, artifact):
+            found = None if injection.literal else _uncovered(injection, entries)
+            if found is not None:
+                line, program = found
+                message = (
+                    f"injected command `{program}` is not covered by allowed-tools or a settings allow rule, "
+                    "so Claude Code aborts the invocation outside auto mode"
+                )
+                yield emit("skill-injection-not-allowed", artifact, message, line)
