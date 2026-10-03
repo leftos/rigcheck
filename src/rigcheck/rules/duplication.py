@@ -2,6 +2,13 @@
 
 Lines are compared clause by clause, as lower-cased word tokens. The finding is about maintenance only: two copies of an
 instruction drift apart when one is edited; it makes no claim about how well Claude follows either.
+
+A compared file is *shared* when git lists it as the repo's own, and *local* otherwise. The user's ``~/.claude/CLAUDE.md``
+and its imports, a ``CLAUDE.local.md`` and a CLAUDE.md in a folder above the repo are local: they exist on one machine
+only, so a repo restating one of their rules is usually deliberate, and deleting the repo copy would drop the
+instruction for a cloud session or a contributor. An AGENTS.md is the repo's shared Codex peer wherever it sits. A
+shared file and a local one are never compared with each other. The MEMORY.md index is compared with both, and sorts
+last so the memory copy is the one reported.
 """
 
 import os
@@ -20,6 +27,12 @@ from rigcheck.rules.references import inside
 _EVERY_TURN_KINDS = frozenset({Kind.INSTRUCTIONS, Kind.RULE, Kind.MEMORY_INDEX})
 """The Markdown kinds discovery can mark every-turn; a shadowed AGENTS.md is an instructions file."""
 _LAYER_RANK = {Layer.USER: 0, Layer.REPO: 1, Layer.MEMORY: 2}
+"""Ordering only: a file's layer says which discovery pass found it, not whether it is shared."""
+_SHARED = "shared"
+_LOCAL = "local"
+_MEMORY = "memory"
+"""The three classes of compared file: the repo's own file, a machine-local one, and the MEMORY.md index."""
+_LOCAL_INSTRUCTIONS = "CLAUDE.local.md"
 _LINE_BREAK = re.compile(r"\r\n?|\n")
 _LIST_MARKER = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
 _IMPORT_LINE = re.compile(r"^@\S+$")
@@ -51,14 +64,55 @@ def _resolved_key(path: Path) -> str:
         return path_key(path)
 
 
-def _compared(rig: Rig) -> list[Artifact]:
-    """The every-turn Markdown files, then the shadowed AGENTS.md peers, in load order, each real file once.
+def _project_name(rig: Rig, path: Path) -> str | None:
+    """Return the file's repo-relative POSIX path, or None when it is not on the repo's drive."""
+    try:
+        return Path(os.path.relpath(path, rig.repo_root)).as_posix()
+    except ValueError:
+        return None
 
-    Loaded files come first, user before repo before memory, then discovery order; a file that resolves to one
-    already listed (a symlinked peer) is left out.
+
+def _shares_project(rig: Rig, path: Path) -> bool:
+    """True when git lists the file as the repo's own: tracked, or untracked and not ignored.
+
+    Outside git the test falls back to location: a file inside the repo is the repo's own, unless it is a
+    ``CLAUDE.local.md``. An ``AGENTS.md`` counts either way: it is the peer Codex reads, and it belongs to the project
+    it sits above rather than to the machine.
+    """
+    files = rig.project_files
+    if files is not None:
+        name = _project_name(rig, path)
+        if name is not None:
+            return name in files
+    return path.name == AGENTS_MD or (inside(path, rig.repo_root) and path.name != _LOCAL_INSTRUCTIONS)
+
+
+def _classify(rig: Rig, artifact: Artifact) -> str:
+    """Return the class of one compared file: ``shared``, ``local`` or ``memory``."""
+    if artifact.kind is Kind.MEMORY_INDEX:
+        return _MEMORY
+    return _SHARED if _shares_project(rig, artifact.path) else _LOCAL
+
+
+def _comparable(one: str, other: str) -> bool:
+    """True unless one file is shared and the other local, which are never compared with each other."""
+    return not (one == _SHARED and other == _LOCAL) and not (one == _LOCAL and other == _SHARED)
+
+
+def _compared(rig: Rig) -> list[Artifact]:
+    """The every-turn Markdown files, then the shadowed AGENTS.md peers, then the memory index, each real file once.
+
+    Loaded files come first, user before repo, then discovery order; every memory file sorts after all of them, and a
+    file that resolves to one already listed (a symlinked peer) is left out.
     """
     ranked = sorted(
-        (artifact.load_class is LoadClass.NOT_LOADED, _LAYER_RANK.get(artifact.layer, len(_LAYER_RANK)), index, artifact)
+        (
+            artifact.kind is Kind.MEMORY_INDEX,
+            artifact.load_class is LoadClass.NOT_LOADED,
+            _LAYER_RANK.get(artifact.layer, len(_LAYER_RANK)),
+            index,
+            artifact,
+        )
         for index, artifact in enumerate(rig.artifacts)
         if _eligible(artifact)
     )
@@ -126,29 +180,36 @@ class _Seen:
     """The clauses of the files already read, indexed by exact tokens and by token, numbered in load order."""
 
     def __init__(self) -> None:
-        self.places: list[tuple[int, int]] = []
+        self.places: list[tuple[int, int, str]] = []
         self.sizes: list[int] = []
-        self.exact: dict[Clause, int] = {}
+        self.exact: dict[Clause, list[int]] = {}
         self.postings: dict[str, list[int]] = {}
 
-    def add(self, place: tuple[int, int], clause: Clause) -> None:
-        """Record a clause found at ``(file index, line)``."""
+    def add(self, place: tuple[int, int], cls: str, clause: Clause) -> None:
+        """Record a clause found at ``(file index, line)`` in a file of class ``cls``."""
         number = len(self.places)
         tokens = set(clause)
-        self.places.append(place)
+        self.places.append((*place, cls))
         self.sizes.append(len(tokens))
-        self.exact.setdefault(clause, number)
+        self.exact.setdefault(clause, []).append(number)
         for token in tokens:
             self.postings.setdefault(token, []).append(number)
 
-    def near(self, clause: Clause) -> int | None:
-        """Return the earliest recorded clause that nearly matches ``clause``, or None."""
+    def exact_match(self, clause: Clause, cls: str) -> int | None:
+        """Return the number of the earliest clause record holding ``clause`` that ``cls`` may be compared with, or None."""
+        for number in self.exact.get(clause, ()):
+            if _comparable(cls, self.places[number][2]):
+                return number
+        return None
+
+    def near(self, clause: Clause, cls: str) -> int | None:
+        """Return the earliest recorded clause that nearly matches ``clause`` in a file ``cls`` may be compared with, or None."""
         tokens = set(clause)
         size = len(tokens)
         overlaps: Counter[int] = Counter()
         for token in tokens:
             for number in self.postings.get(token, ()):
-                if self.sizes[number] <= 2 * size and size <= 2 * self.sizes[number]:
+                if _comparable(cls, self.places[number][2]) and self.sizes[number] <= 2 * size and size <= 2 * self.sizes[number]:
                     overlaps[number] += 1
         matches = [number for number, overlap in overlaps.items() if _near(min(size, self.sizes[number]), max(size, self.sizes[number]), overlap)]
         return min(matches, default=None)
@@ -161,17 +222,17 @@ def _label(rig: Rig, path: Path) -> str:
     return path.as_posix()
 
 
-def _message(rig: Rig, files: list[Artifact], seen: _Seen, found: list[Clause]) -> str | None:
+def _message(rig: Rig, files: list[Artifact], seen: _Seen, found: list[Clause], cls: str) -> str | None:
     """Return the message naming the earliest exact match of any clause, else the earliest near match, or None."""
-    exact = [seen.exact[clause] for clause in found if clause in seen.exact]
+    exact = [number for number in (seen.exact_match(clause, cls) for clause in found) if number is not None]
     if exact:
         verb, number = "repeats", min(exact)
     else:
-        near = [match for match in (seen.near(clause) for clause in found) if match is not None]
+        near = [match for match in (seen.near(clause, cls) for clause in found) if match is not None]
         if not near:
             return None
         verb, number = "nearly repeats", min(near)
-    index, line = seen.places[number]
+    index, line, _cls = seen.places[number]
     return f"{verb} {_label(rig, files[index].path)}:{line}"
 
 
@@ -187,12 +248,13 @@ def duplicate_line(rig: Rig) -> Iterator[Finding]:
     files = _compared(rig)
     seen = _Seen()
     for index, artifact in enumerate(files):
+        cls = _classify(rig, artifact)
         pending: list[tuple[int, list[Clause]]] = []
         for number, found in _lines(rig, artifact):
-            message = _message(rig, files, seen, found)
+            message = _message(rig, files, seen, found, cls)
             if message is not None:
                 yield emit("duplicate-line", artifact, message, number)
             pending.append((number, found))
         for number, found in pending:
             for clause in found:
-                seen.add((index, number), clause)
+                seen.add((index, number), cls, clause)

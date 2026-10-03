@@ -3,7 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from support import Workspace, run_json, symlink_or_skip, write
+from rigcheck.discover import memory_dir
+from support import Workspace, git_add, run_json, symlink_or_skip, write
 
 FORMAT_RULES = "# Project\n\nDo NOT run bare `dotnet format`. Do NOT pass `-v q`, `--nologo`, or extra flags to `dotnet format`.\n"
 FORMATTER = "Always run the formatter before you commit.\n"
@@ -81,12 +82,11 @@ def test_ignored_by_claude_not_compared(workspace: Workspace, capsys: pytest.Cap
     assert _findings(capsys, rig, workspace.home) == []
 
 
-def test_user_claude_md_is_first(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+def test_user_and_repo_claude_md_not_compared(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     write(workspace.home / ".claude" / "CLAUDE.md", "- Do not run bare `dotnet format` in any repository.\n")
     rig = workspace.rig()
     write(rig / "CLAUDE.md", "# Project\n\nDo not run bare `dotnet format` in any repository.\n")
-    findings = _findings(capsys, rig, workspace.home)
-    assert findings == [("CLAUDE.md", 3, "repeats ~/.claude/CLAUDE.md:1")]
+    assert _findings(capsys, rig, workspace.home) == []
 
 
 def test_unscoped_rule_compared(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
@@ -118,19 +118,97 @@ def test_symlinked_peer_not_compared(workspace: Workspace, capsys: pytest.Captur
     assert _findings(capsys, rig, workspace.home) == []
 
 
-def test_user_rule_is_earlier_than_repo_rule(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+def test_user_rule_and_repo_rule_not_compared(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     write(workspace.home / ".claude" / "rules" / "u.md", FORMATTER)
     rig = workspace.rig()
     write(rig / ".claude" / "rules" / "a.md", FORMATTER)
-    assert _findings(capsys, rig, workspace.home) == [(".claude/rules/a.md", 1, "repeats ~/.claude/rules/u.md:1")]
+    assert _findings(capsys, rig, workspace.home) == []
 
 
-def test_user_import_is_earlier_than_repo_claude_md(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+def test_user_rule_repeats_user_claude_md(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    write(workspace.home / ".claude" / "CLAUDE.md", FORMATTER)
+    write(workspace.home / ".claude" / "rules" / "u.md", FORMATTER)
+    rig = workspace.rig()
+    assert _findings(capsys, rig, workspace.home) == [("~/.claude/rules/u.md", 1, "repeats ~/.claude/CLAUDE.md:1")]
+
+
+def test_user_import_and_repo_claude_md_not_compared(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     write(workspace.home / ".claude" / "CLAUDE.md", "@~/.claude/shared.md\n")
     write(workspace.home / ".claude" / "shared.md", FORMATTER)
     rig = workspace.rig()
     write(rig / "CLAUDE.md", "# Project\n\n" + FORMATTER)
-    assert _findings(capsys, rig, workspace.home) == [("CLAUDE.md", 3, "repeats ~/.claude/shared.md:1")]
+    assert _findings(capsys, rig, workspace.home) == []
+
+
+def test_memory_repeats_repo_claude_md(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rig = workspace.rig()
+    write(rig / "CLAUDE.md", "# Project\n\n" + FORMATTER)
+    index = memory_dir(rig, workspace.home) / "MEMORY.md"
+    write(index, "- " + FORMATTER)
+    assert _findings(capsys, rig, workspace.home) == [(_shown(index, rig, workspace.home), 1, "repeats CLAUDE.md:3")]
+
+
+def test_memory_repeats_user_claude_md(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    write(workspace.home / ".claude" / "CLAUDE.md", FORMATTER)
+    rig = workspace.rig()
+    index = memory_dir(rig, workspace.home) / "MEMORY.md"
+    write(index, "- " + FORMATTER)
+    assert _findings(capsys, rig, workspace.home) == [(_shown(index, rig, workspace.home), 1, "repeats ~/.claude/CLAUDE.md:1")]
+
+
+def test_ancestor_claude_md_outside_repo_not_compared_with_repo(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rig = workspace.rig()
+    write(workspace.home / "work" / "CLAUDE.md", "# Parent\n\n" + FORMATTER)
+    write(rig / "CLAUDE.md", "# Project\n\n" + FORMATTER)
+    assert _findings(capsys, rig, workspace.home) == []
+
+
+def test_ancestor_claude_md_compared_with_user_claude_md(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    write(workspace.home / ".claude" / "CLAUDE.md", FORMATTER)
+    rig = workspace.rig()
+    write(workspace.home / "work" / "CLAUDE.md", "# Parent\n\n" + FORMATTER)
+    assert _findings(capsys, rig, workspace.home) == [("~/work/CLAUDE.md", 3, "repeats ~/.claude/CLAUDE.md:1")]
+
+
+def test_claude_local_md_compared_with_user_claude_md(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    write(workspace.home / ".claude" / "CLAUDE.md", FORMATTER)
+    rig = workspace.rig()
+    write(rig / ".gitignore", "CLAUDE.local.md\n")
+    write(rig / "CLAUDE.md", "# Project\n\nShared instructions live here.\n")
+    write(rig / "CLAUDE.local.md", "# Local\n\n" + FORMATTER)
+    git_add(rig, [".gitignore", "CLAUDE.md"])
+    assert _findings(capsys, rig, workspace.home) == [("CLAUDE.local.md", 3, "repeats ~/.claude/CLAUDE.md:1")]
+
+
+def test_repo_importing_personal_file_not_compared(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rig = workspace.rig()
+    write(rig / "CLAUDE.md", "# Project\n\n" + FORMATTER + "\n@~/.claude/personal.md\n")
+    write(workspace.home / ".claude" / "personal.md", FORMATTER)
+    assert _findings(capsys, rig, workspace.home) == []
+
+
+def test_home_repo_agents_md_compared_with_its_claude_md(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rig = workspace.home / ".claude"
+    write(rig / "CLAUDE.md", "# Home\n\n" + FORMATTER)
+    write(rig / "AGENTS.md", "# Agents\n\n" + FORMATTER)
+    git_add(rig, ["CLAUDE.md", "AGENTS.md"])
+    assert _findings(capsys, rig, workspace.home) == [("AGENTS.md", 3, "repeats CLAUDE.md:3")]
+
+
+def test_shadowed_agents_md_never_reported_against_memory(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rig = workspace.rig()
+    write(rig / "CLAUDE.md", "# Project\n\nUnrelated shared instructions.\n")
+    write(rig / "AGENTS.md", "# Agents\n\n" + FORMATTER)
+    index = memory_dir(rig, workspace.home) / "MEMORY.md"
+    write(index, "- " + FORMATTER)
+    assert _findings(capsys, rig, workspace.home) == [(_shown(index, rig, workspace.home), 1, "repeats AGENTS.md:3")]
+
+
+def test_near_match_not_compared_across_shared_and_local(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    write(workspace.home / ".claude" / "CLAUDE.md", FORMAT_RULES)
+    rig = workspace.rig()
+    write(rig / "CLAUDE.md", "# Project\n\n- Never pass `-q`, `-v q`, `--nologo`, or extra quieting flags to `dotnet format`.\n")
+    assert _findings(capsys, rig, workspace.home) == []
 
 
 def test_shadowed_parent_agents_md_is_last(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:

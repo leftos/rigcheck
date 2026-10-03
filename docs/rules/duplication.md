@@ -11,6 +11,13 @@
 ## Files compared
 
 - The rule compares every every-turn artifact that is Markdown: the user and repo CLAUDE.md, their imports, rules with no `paths`, and the MEMORY.md index. It adds the repo's AGENTS.md even when it is shadowed (not loaded because a CLAUDE.md exists): that file is the peer Codex reads, and its copy drifts the same way.
+- A shared file is never compared with a machine-local one.
+  - A file is shared when it is one of the repo's project files: tracked, or untracked and not ignored.
+  - Every other file is local: `~/.claude/CLAUDE.md` with its imports and the user rules, a CLAUDE.md in a folder above the repo, a gitignored `CLAUDE.local.md`, and a personal file the repo imports.
+  - The reason: a local file lives on one machine, so a repo that restates one of its rules is usually doing so on purpose. Deleting the shared copy would drop the instruction for a cloud session, another machine or a contributor.
+  - Shared files are compared with each other, and local files with each other. When the target is the `~/.claude` repo itself, its CLAUDE.md and AGENTS.md are shared and are compared.
+  - The location decides, not the layer. Discovery labels a file by the pass that found it, so an ancestor CLAUDE.md or a gitignored `CLAUDE.local.md` carries the repo layer.
+- The MEMORY.md index is compared with both shared and local files, since MM5 is about memory repeating what the CLAUDE.md files already say.
 - `AGENTS.local.md` and `AGENTS.override.md` are never compared, since Claude Code never reads them. Neither are files loaded on demand, on invoke, or as config.
 - A file is never compared with itself, including through a symlink: an AGENTS.md that links to CLAUDE.md (a common way to share one file between Codex and Claude Code) is the same file, compared once. A sentence repeated inside one file is that file's business, not a cross-file drift.
 
@@ -34,6 +41,6 @@
 
 ## Where the finding sits
 
-- Files are ordered as Claude Code loads them. User-level files come first (`~/.claude/CLAUDE.md`, its imports, user rules), then repo files, then memory. Within a layer the order is discovery's. A shadowed AGENTS.md comes after every loaded file, since Claude Code never reads it. A line is reported when one of its clauses matches a clause in an earlier file. The earlier copy is the one to keep, and the later copy is the one to delete or replace with an import.
+- Files are ordered as Claude Code loads them. User-level files come first (`~/.claude/CLAUDE.md`, its imports, user rules), then repo files, then a shadowed AGENTS.md, then memory last. A memory copy of a CLAUDE.md line is therefore always the reported one, and a shared file is never told it repeats memory. Within a layer the order is discovery's. A shadowed AGENTS.md comes after every loaded file, since Claude Code never reads it. A line is reported when one of its clauses matches a clause in an earlier file. The earlier copy is the one to keep, and the later copy is the one to delete or replace with an import.
 - There is one finding per line, even when several of its clauses match. It names the earliest match, preferring an exact match to a near one: `repeats <file>:<line>` or `nearly repeats <file>:<line>`.
 - `<file>` is relative to the repo root, starts `~/` for a file in the home folder, and is otherwise the full path. The message never quotes the text, so a report never prints a user's files.
