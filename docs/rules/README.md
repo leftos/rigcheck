@@ -13,5 +13,6 @@ One doc per rule area: what the area checks, its rule ids with severity and evid
 - [`settings-and-permissions.md`](settings-and-permissions.md): config files that do not load, the settings schema, permission rules, and secret files without a Read deny.
 - [`mcp.md`](mcp.md): MCP server types, the variable references Claude Code does not expand in a server definition, credential literals in a shared config, and server names defined in more than one scope.
 - [`secrets.md`](secrets.md): credential literals in instruction, memory, skill, command and agent files, and skills and commands that pipe a downloaded script into a shell.
+- [`duplication.md`](duplication.md): instructions that two every-turn files, or an AGENTS.md peer, both state.
 
 `internal-error` belongs to the engine: a rule that raises becomes one `internal-error` finding and the other rules still run.
