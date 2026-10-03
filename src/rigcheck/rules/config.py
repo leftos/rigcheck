@@ -77,6 +77,7 @@ class McpServer:
         name: The server's name, the key it is written under.
         config: The server's value, as written.
         line: The 1-based line of the server's key, or None when the text does not show one.
+        path: The key path of the server's entry in its file: ``("mcpServers", name)``, or ``(name,)`` in a flat plugin file.
     """
 
     artifact: Artifact
@@ -84,6 +85,7 @@ class McpServer:
     name: str
     config: object
     line: int | None
+    path: tuple[str, ...]
 
 
 _JSON_SOURCES: dict[Kind, HookSource] = {
@@ -213,7 +215,8 @@ def _mcp_servers(rig: Rig, artifact: Artifact, source: McpSource) -> Iterator[Mc
         return
     for name, server in servers.items():
         if isinstance(name, str):
-            yield McpServer(artifact, source, name, server, config.key_line(text, (*prefix, name)))
+            path = (*prefix, name)
+            yield McpServer(artifact, source, name, server, config.key_line(text, path), path)
 
 
 def mcp_servers(rig: Rig) -> Iterator[McpServer]:
