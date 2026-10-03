@@ -9,8 +9,8 @@ from pathlib import Path
 
 from rigcheck import __version__, engine
 from rigcheck.discover import discover
-from rigcheck.model import DEFAULT_WINDOW, Finding, Outcome, Rule, Severity, Suppressed
-from rigcheck.report import budget, terminal
+from rigcheck.model import DEFAULT_WINDOW, Finding, Outcome, Rig, Rule, Severity, Suppressed
+from rigcheck.report import brief, budget, terminal
 from rigcheck.report import json as json_report
 from rigcheck.rules import DEFAULT_PACKS, PACKS, REGISTRY
 
@@ -23,19 +23,15 @@ _WINDOW_MULTIPLIERS = {"": 1, "k": 1_000, "m": 1_000_000}
 _RULE_DOCS = Path(__file__).resolve().parents[2] / "docs" / "rules"
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Build the top-level argument parser."""
-    parser = argparse.ArgumentParser(prog="rigcheck", description="Validate a coding-agent instruction setup.")
-    parser.add_argument("--version", action="version", version=f"rigcheck {__version__}")
-    commands = parser.add_subparsers(dest="command", metavar="COMMAND")
-    check = commands.add_parser("check", help="check the effective setup Claude Code loads for a directory")
-    check.add_argument("path", nargs="?", type=Path, default=None, metavar="PATH", help="directory to check (default: current directory)")
-    check.add_argument("--format", choices=("text", "json"), default="text", help="output format (default: text)")
-    check.add_argument("--home", type=Path, default=None, metavar="DIR", help="home directory holding .claude (default: your home)")
-    check.add_argument(
+def _run_flags() -> argparse.ArgumentParser:
+    """Return the parser holding the flags ``check`` and ``brief`` share."""
+    flags = argparse.ArgumentParser(add_help=False)
+    flags.add_argument("path", nargs="?", type=Path, default=None, metavar="PATH", help="directory to check (default: current directory)")
+    flags.add_argument("--home", type=Path, default=None, metavar="DIR", help="home directory holding .claude (default: your home)")
+    flags.add_argument(
         "--window", type=parse_window, default=DEFAULT_WINDOW, metavar="SIZE", help="model context window in tokens, like 200k or 1m (default: 200k)"
     )
-    check.add_argument(
+    flags.add_argument(
         "--sibling",
         type=Path,
         action="append",
@@ -43,20 +39,32 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="DIR",
         help="a sibling checkout where a path named in a doc, skill, agent or command may exist instead (repeatable)",
     )
-    check.add_argument("--only", type=parse_only, default=None, metavar="ID[,ID...]", help="report only the findings of these rule ids")
-    check.add_argument(
+    flags.add_argument("--only", type=parse_only, default=None, metavar="ID[,ID...]", help="report only the findings of these rule ids")
+    flags.add_argument(
         "--packs",
         type=parse_packs,
         default=DEFAULT_PACKS,
         metavar="PACK[,PACK...]",
         help="packs whose rules run (default: core,advice; house is off unless named)",
     )
+    return flags
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the top-level argument parser."""
+    parser = argparse.ArgumentParser(prog="rigcheck", description="Validate a coding-agent instruction setup.")
+    parser.add_argument("--version", action="version", version=f"rigcheck {__version__}")
+    commands = parser.add_subparsers(dest="command", metavar="COMMAND")
+    check = commands.add_parser("check", help="check the effective setup Claude Code loads for a directory", parents=[_run_flags()])
+    check.add_argument("--format", choices=("text", "json"), default="text", help="output format (default: text)")
     check.add_argument(
         "--fail-on",
         choices=[severity.value for severity in Severity],
         default=Severity.ERROR.value,
         help="lowest finding severity that makes the exit status 1 (default: error)",
     )
+    brief_command = commands.add_parser("brief", help="write a Markdown fix brief of the findings", parents=[_run_flags()])
+    brief_command.add_argument("-o", "--output", type=Path, default=None, metavar="FILE", help="write the brief to FILE instead of stdout")
     rules = commands.add_parser("rules", help="list every rule with its pack, severity and summary")
     rules.add_argument("--format", choices=("text", "json"), default="text", help="output format (default: text)")
     explain = commands.add_parser("explain", help="explain one rule: its pack, severity, fix and evidence")
@@ -159,7 +167,16 @@ def _select(outcome: Outcome, only: frozenset[str] | None) -> tuple[list[Finding
     return findings, suppressed
 
 
-def _check(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+def _analyze(parser: argparse.ArgumentParser, args: argparse.Namespace) -> tuple[Rig, list[Finding], list[Suppressed]]:
+    """Resolve the target, discover the rig, run the selected rules and return the kept findings.
+
+    Args:
+        parser: The subparser whose ``error`` reports an unusable target or sibling path.
+        args: The parsed command-line arguments.
+
+    Returns:
+        The rig, its ranked findings with suppressions applied, and the findings a ``.rigcheck.toml`` entry silenced.
+    """
     target = (args.path or Path.cwd()).resolve()
     if not target.is_dir():
         parser.error(f"not a directory: {target}")
@@ -172,6 +189,11 @@ def _check(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     rules = _rules_to_run(args.packs, args.only)
     outcome = engine.apply_suppressions(rig, engine.run(rig, rules), _ran_ids(rules))
     findings, suppressed = _select(outcome, args.only)
+    return rig, findings, suppressed
+
+
+def _check(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+    rig, findings, suppressed = _analyze(parser, args)
     report = budget.compute(rig)
     if args.format == "json":
         output = json_report.render(rig, findings, suppressed, report)
@@ -180,6 +202,25 @@ def _check(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     _write_stdout(output)
     threshold = Severity(args.fail_on)
     return 1 if any(finding.severity.rank <= threshold.rank for finding in findings) else 0
+
+
+def _brief(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+    """Write a Markdown fix brief of the findings to stdout, or to ``--output`` when given."""
+    rig, findings, _ = _analyze(parser, args)
+    text = brief.render(rig, findings)
+    if args.output is None:
+        _write_stdout(text)
+        return 0
+    if args.output.is_dir():
+        parser.error(f"--output is a folder: {args.output}")
+    if not args.output.parent.is_dir():
+        parser.error(f"--output folder does not exist: {args.output.parent}")
+    try:
+        with args.output.open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+    except OSError as error:
+        parser.error(f"cannot write --output {args.output}: {error.strerror or error}")
+    return 0
 
 
 def _ordered_rules() -> list[Rule]:
@@ -279,12 +320,13 @@ def _explain(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Run the CLI and return the process exit code.
 
-    Commands are ``check`` (validate a setup), ``rules`` (list every rule) and ``explain``
-    (describe one rule). The code is 0 clean, 1 a finding at or above ``--fail-on`` and 2 a usage error.
+    Commands are ``check`` (validate a setup), ``brief`` (write a Markdown fix brief), ``rules``
+    (list every rule) and ``explain`` (describe one rule). The code is 0 clean, 1 a finding at or
+    above ``--fail-on`` and 2 a usage error.
     """
     parser = build_parser()
     args = parser.parse_args(argv)
-    handlers = {"check": _check, "explain": _explain, "rules": _rules}
+    handlers = {"brief": _brief, "check": _check, "explain": _explain, "rules": _rules}
     handler = handlers.get(args.command or "")
     if handler is None:
         parser.print_help(sys.stderr)
