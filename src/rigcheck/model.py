@@ -104,6 +104,23 @@ class UserMcpServer:
 
 
 @dataclass(frozen=True)
+class Suppression:
+    """One ``[[suppress]]`` entry of the checked repo's ``.rigcheck.toml``.
+
+    Attributes:
+        rule: The id of the rule whose findings the entry silences.
+        path: A glob, relative to the repo root, limiting the entry to matching files; None for every file.
+        reason: Why the finding does not apply, as written; None when the entry gives none.
+        line: The 1-based line of the entry's ``[[suppress]]`` header in the file.
+    """
+
+    rule: str
+    path: str | None
+    reason: str | None
+    line: int
+
+
+@dataclass(frozen=True)
 class Finding:
     """One rule violation at one location."""
 
@@ -181,6 +198,7 @@ class Rig:
             The file itself is never an artifact.
         window: The model's context window, in tokens.
         siblings: Folders given with ``--sibling`` where a doc, skill, agent or command path may also exist.
+        suppressions: The valid entries of the repo's ``.rigcheck.toml``, in file order; empty when the target is home.
     """
 
     target: Path
@@ -191,6 +209,7 @@ class Rig:
     user_mcp_servers: tuple[UserMcpServer, ...]
     window: int
     siblings: tuple[Path, ...] = ()
+    suppressions: tuple[Suppression, ...] = ()
     _texts: dict[Path, str] = field(default_factory=dict, init=False, repr=False, compare=False)
 
     def text(self, path: Path) -> str:

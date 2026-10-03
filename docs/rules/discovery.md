@@ -17,11 +17,12 @@ Discovery builds the `Rig`: every artifact of the effective setup, tagged with i
 - **User**: `~/.claude/CLAUDE.md` and the same `.claude/` contents under the home folder. In both `.claude/` folders, commands and agents are found at any depth (`commands/**/*.md`, `agents/**/*.md`); skills are `skills/*/SKILL.md` and output styles `output-styles/*.md`.
 - **Plugin**: every plugin in `~/.claude/plugins/installed_plugins.json` that `enabledPlugins` turns on (user, project and local settings merged, later files winning) and whose install entry applies (user scope, or project or local scope for this repo root). A plugin contributes `skills/*/SKILL.md`, flat `agents/*.md` and `commands/*.md`, `output-styles/*.md`, `hooks/hooks.json`, `.mcp.json` and `.claude-plugin/plugin.json`. Plugins ship no `rules/` folder, so no rule file comes from this layer.
 - **Memory**: `MEMORY.md` and the topic files in this repo's own memory folder only.
+- The repo root's `.rigcheck.toml` is read for its suppression entries into `Rig.suppressions` ([`suppressions.md`](suppressions.md)). It is rigcheck's own config, so it is never an artifact.
 - Nested `CLAUDE.md` files come from git's file list inside a repository; outside one, a walk of the target that skips `SKIP_DIRS` (`.git`, `node_modules`, `.venv`, `bin`, `obj`, `dist`, `build`, `.tmp`) and does not enter junctions.
 
 ## The home folder as target
 
-When the target is the home folder itself, only `~/.claude` is checked: there is no repo-layer instruction chain, no nested `CLAUDE.md` walk, no `CLAUDE.md` directly in the home folder, no repo docs and no repo `.mcp.json`; plugins and memory are still discovered. A walk of the whole home folder visits every folder, and the nested `CLAUDE.md` files it finds there sit mostly in tool and test temp folders under AppData, not in instructions anyone loads; the home check must finish in a few seconds. A subfolder of home that is not a git repository keeps the usual walk and its exclusions.
+When the target is the home folder itself, only `~/.claude` is checked: there is no repo-layer instruction chain, no nested `CLAUDE.md` walk, no `CLAUDE.md` directly in the home folder, no repo docs, no repo `.mcp.json` and no `.rigcheck.toml`; plugins and memory are still discovered. A walk of the whole home folder visits every folder, and the nested `CLAUDE.md` files it finds there sit mostly in tool and test temp folders under AppData, not in instructions anyone loads; the home check must finish in a few seconds. A subfolder of home that is not a git repository keeps the usual walk and its exclusions.
 
 ## Rules folders
 

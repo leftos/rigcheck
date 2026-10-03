@@ -84,4 +84,5 @@ import rigcheck.rules.rules_dir  # noqa: E402 - imported for its registrations
 import rigcheck.rules.secrets  # noqa: E402 - imported for its registrations
 import rigcheck.rules.settings  # noqa: E402 - imported for its registrations
 import rigcheck.rules.skill_body  # noqa: E402 - imported for its registrations
-import rigcheck.rules.skills  # noqa: E402, F401 - imported for its registrations
+import rigcheck.rules.skills  # noqa: E402 - imported for its registrations
+import rigcheck.rules.suppressions  # noqa: E402, F401 - imported for its registrations

@@ -1,0 +1,7 @@
+[[suppress]]
+rule = "skill-description-missing"
+reason = ""
+
+[[suppress]]
+rule = "import-unresolved"
+path = "docs/**"

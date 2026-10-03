@@ -10,6 +10,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any
 
+from rigcheck.config import load_suppressions
 from rigcheck.model import Artifact, Kind, Layer, LoadClass, McpScope, Rig, UserMcpServer, git_output, unc_link_target
 from rigcheck.parse import frontmatter
 from rigcheck.parse.markdown import Import, find_imports, strip_html_comments
@@ -629,6 +630,7 @@ def discover(target: Path, home: Path, window: int, *, siblings: tuple[Path, ...
 
     Problems with unreadable or malformed inputs are collected in ``Rig.problems``; discovery never raises for them.
     Only this project's own memory folder is read, and ``~/.claude.json`` is read only for its MCP servers, never as an artifact.
+    The repo root's ``.rigcheck.toml`` is read only for its suppressions, never as an artifact.
     When ``target`` is the home directory itself, only ``~/.claude`` is discovered: no repo-layer chain at home and no nested ``CLAUDE.md`` walk.
 
     Args:
@@ -651,6 +653,8 @@ def discover(target: Path, home: Path, window: int, *, siblings: tuple[Path, ...
     _add_memory(b)
     servers, problems = _claude_json_servers(home, None if b.home_target else repo_root)
     b.problems.extend(problems)
+    suppressions, problems = ((), []) if b.home_target else load_suppressions(repo_root / ".rigcheck.toml")
+    b.problems.extend(problems)
     return Rig(
         target=target,
         repo_root=repo_root,
@@ -660,4 +664,5 @@ def discover(target: Path, home: Path, window: int, *, siblings: tuple[Path, ...
         user_mcp_servers=servers,
         window=window,
         siblings=siblings,
+        suppressions=suppressions,
     )
