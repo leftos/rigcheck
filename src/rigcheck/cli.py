@@ -2,6 +2,7 @@
 
 import argparse
 import difflib
+import json
 import re
 import sys
 from pathlib import Path
@@ -18,6 +19,8 @@ WINDOW_ERROR = "window must be a positive number of tokens, like 200k or 1m"
 
 _WINDOW = re.compile(r"([1-9][0-9]*)([km]?)", re.IGNORECASE)
 _WINDOW_MULTIPLIERS = {"": 1, "k": 1_000, "m": 1_000_000}
+
+_RULE_DOCS = Path(__file__).resolve().parents[2] / "docs" / "rules"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -54,7 +57,25 @@ def build_parser() -> argparse.ArgumentParser:
         default=Severity.ERROR.value,
         help="lowest finding severity that makes the exit status 1 (default: error)",
     )
+    rules = commands.add_parser("rules", help="list every rule with its pack, severity and summary")
+    rules.add_argument("--format", choices=("text", "json"), default="text", help="output format (default: text)")
+    explain = commands.add_parser("explain", help="explain one rule: its pack, severity, fix and evidence")
+    explain.add_argument("rule_id", metavar="RULE_ID")
+    explain.add_argument("--format", choices=("text", "json"), default="text", help="output format (default: text)")
     return parser
+
+
+def _write_stdout(text: str) -> None:
+    """Write ``text`` to stdout as UTF-8, replacing characters the stream cannot encode."""
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout.write(text)
+
+
+def _closest_ids(rule_id: str) -> list[str]:
+    """Return up to three registered rule ids closest to ``rule_id``."""
+    return difflib.get_close_matches(rule_id, sorted(REGISTRY), n=3, cutoff=0.0)
 
 
 def parse_only(value: str) -> frozenset[str]:
@@ -74,7 +95,7 @@ def parse_only(value: str) -> frozenset[str]:
         raise argparse.ArgumentTypeError("give at least one rule id, like reference-path-missing")
     for rule_id in ids:
         if rule_id not in REGISTRY:
-            closest = difflib.get_close_matches(rule_id, sorted(REGISTRY), n=3, cutoff=0.0)
+            closest = _closest_ids(rule_id)
             raise argparse.ArgumentTypeError(f"unknown rule id {rule_id!r}; closest: {', '.join(closest)}")
     return frozenset(ids)
 
@@ -156,22 +177,119 @@ def _check(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         output = json_report.render(rig, findings, suppressed, report)
     else:
         output = terminal.render(rig, findings, suppressed, report, color=terminal.use_color(sys.stdout))
-    reconfigure = getattr(sys.stdout, "reconfigure", None)
-    if reconfigure is not None:
-        reconfigure(encoding="utf-8", errors="replace")
-    sys.stdout.write(output)
+    _write_stdout(output)
     threshold = Severity(args.fail_on)
     return 1 if any(finding.severity.rank <= threshold.rank for finding in findings) else 0
 
 
+def _ordered_rules() -> list[Rule]:
+    """Return every registered rule ordered by pack in ``PACKS`` order, then by id."""
+    return sorted(REGISTRY.values(), key=lambda rule: (PACKS.index(rule.pack), rule.id))
+
+
+def _format_rules_text(rules: list[Rule]) -> str:
+    """Render rules as aligned text, one line per rule with no header."""
+    if not rules:
+        return ""
+    id_width = max(len(rule.id) for rule in rules)
+    pack_width = max(len(rule.pack) for rule in rules)
+    severity_width = max(len(rule.severity.value) for rule in rules)
+    lines = [
+        f"{rule.id.ljust(id_width)}  {rule.pack.ljust(pack_width)}  {rule.severity.value.ljust(severity_width)}  {rule.summary}".rstrip()
+        for rule in rules
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _format_explain_text(rule: Rule, docs: str | None) -> str:
+    """Render one rule as labelled lines, aligning the values under the widest label."""
+    label_width = len("severity") + 2
+    lines = [
+        f"{'id':<{label_width}}{rule.id}",
+        f"{'pack':<{label_width}}{rule.pack}",
+        f"{'severity':<{label_width}}{rule.severity.value}",
+        f"{'summary':<{label_width}}{rule.summary}",
+        f"{'fix':<{label_width}}{rule.fix}",
+        f"{'evidence':<{label_width}}{rule.evidence[0]}",
+    ]
+    lines.extend(" " * label_width + extra for extra in rule.evidence[1:])
+    if docs is not None:
+        lines.append(f"{'docs':<{label_width}}{docs}")
+    return "\n".join(lines) + "\n"
+
+
+def _rule_doc(rule_id: str, docs: Path) -> str | None:
+    """Return the repo-relative area doc whose rules table lists ``rule_id``, or None when none does."""
+    if not docs.is_dir():
+        return None
+    pattern = re.compile(rf"^\|\s*`{re.escape(rule_id)}`\s*\|", re.MULTILINE)
+    for path in sorted(docs.glob("*.md")):
+        if path.name == "README.md":
+            continue
+        if pattern.search(path.read_text(encoding="utf-8")):
+            return f"docs/rules/{path.name}"
+    return None
+
+
+def _rules(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+    """Print every registered rule, ordered by pack then id, as text or JSON."""
+    rules = _ordered_rules()
+    if args.format == "json":
+        payload = [
+            {
+                "id": rule.id,
+                "pack": rule.pack,
+                "severity": rule.severity.value,
+                "summary": rule.summary,
+                "fix": rule.fix,
+                "evidence": list(rule.evidence),
+            }
+            for rule in rules
+        ]
+        _write_stdout(json.dumps(payload, indent=2) + "\n")
+    else:
+        _write_stdout(_format_rules_text(rules))
+    return 0
+
+
+def _explain(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+    """Print one rule's metadata and area doc, or report an unknown id as a usage error."""
+    rule = REGISTRY.get(args.rule_id)
+    if rule is None:
+        closest = ", ".join(_closest_ids(args.rule_id))
+        sys.stderr.write(f"rigcheck explain: unknown rule id {args.rule_id!r}; closest: {closest}\n")
+        return USAGE_ERROR
+    docs = _rule_doc(rule.id, _RULE_DOCS)
+    if args.format == "json":
+        payload = {
+            "id": rule.id,
+            "pack": rule.pack,
+            "severity": rule.severity.value,
+            "summary": rule.summary,
+            "fix": rule.fix,
+            "evidence": list(rule.evidence),
+            "docs": docs,
+        }
+        _write_stdout(json.dumps(payload, indent=2) + "\n")
+    else:
+        _write_stdout(_format_explain_text(rule, docs))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Run the CLI and return the process exit code (0 clean, 1 a finding at or above --fail-on, 2 usage error)."""
+    """Run the CLI and return the process exit code.
+
+    Commands are ``check`` (validate a setup), ``rules`` (list every rule) and ``explain``
+    (describe one rule). The code is 0 clean, 1 a finding at or above ``--fail-on`` and 2 a usage error.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.command != "check":
+    handlers = {"check": _check, "explain": _explain, "rules": _rules}
+    handler = handlers.get(args.command or "")
+    if handler is None:
         parser.print_help(sys.stderr)
         return USAGE_ERROR
-    return _check(parser, args)
+    return handler(parser, args)
 
 
 if __name__ == "__main__":
