@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 
 from rigcheck import __version__, engine
-from rigcheck.cli import _rules_to_run, main, parse_packs
+from rigcheck.cli import _RULE_DOCS, _rule_doc, _rules_to_run, main, parse_packs
 from rigcheck.model import Finding, Rig, Severity
-from rigcheck.rules import DEFAULT_PACKS, REGISTRY, rule
+from rigcheck.rules import DEFAULT_PACKS, PACKS, REGISTRY, rule
 from support import Workspace, write
 
 
@@ -207,3 +207,87 @@ def test_packs_house_skips_core_rules_and_their_suppressions(workspace: Workspac
     assert "reference-path-missing" not in rules
     assert "suppression-unused" not in rules
     assert report["summary"]["suppressed"] == 0
+
+
+def test_rules_lists_every_registered_rule_once(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["rules"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == len(REGISTRY)
+    ids = [line.split()[0] for line in lines]
+    for rule_id in REGISTRY:
+        assert ids.count(rule_id) == 1
+
+
+def test_rules_orders_by_pack_then_id(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["rules"]) == 0
+    rows = [line.split() for line in capsys.readouterr().out.splitlines()]
+    parsed = [(row[1], row[0]) for row in rows]
+    assert parsed == sorted(parsed, key=lambda pair: (PACKS.index(pair[0]), pair[1]))
+
+
+def test_rules_json_has_catalog_fields(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["rules", "--format", "json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert len(payload) == len(REGISTRY)
+    assert all(set(entry) == {"id", "pack", "severity", "summary", "fix", "evidence"} for entry in payload)
+    entry = next(entry for entry in payload if entry["id"] == "suppression-no-reason")
+    meta = REGISTRY["suppression-no-reason"]
+    assert entry["pack"] == meta.pack == "core"
+    assert entry["severity"] == meta.severity.value == "warn"
+    assert entry["evidence"] == list(meta.evidence) == ["rigcheck:suppressions"]
+
+
+def test_explain_prints_rule_fields_and_area_doc(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["explain", "suppression-no-reason"]) == 0
+    out = capsys.readouterr().out
+    assert "id        suppression-no-reason" in out
+    assert "pack      core" in out
+    assert "severity  warn" in out
+    assert "evidence  rigcheck:suppressions" in out
+    assert "docs      docs/rules/suppressions.md" in out
+
+
+def test_explain_json_matches_registry(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["explain", "suppression-no-reason", "--format", "json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    meta = REGISTRY["suppression-no-reason"]
+    assert payload["id"] == meta.id
+    assert payload["pack"] == meta.pack
+    assert payload["severity"] == meta.severity.value
+    assert payload["summary"] == meta.summary
+    assert payload["fix"] == meta.fix
+    assert payload["evidence"] == list(meta.evidence)
+    assert payload["docs"] == "docs/rules/suppressions.md"
+
+
+def test_explain_unknown_id_exits_2_with_closest(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["explain", "suppresion-no-reason"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "unknown rule id 'suppresion-no-reason'; closest: suppression-no-reason" in captured.err
+
+
+def test_explain_lists_every_evidence_string(capsys: pytest.CaptureFixture[str]) -> None:
+    def check(rig: Rig) -> tuple[Finding, ...]:
+        """A throwaway check that yields no findings."""
+        return ()
+
+    rule_id = "explain-throwaway"
+    rule(rule_id, "house", Severity.INFO, "Fix it.", ("rigcheck:one", "official:two"))(check)
+    try:
+        assert main(["explain", rule_id]) == 0
+    finally:
+        REGISTRY.pop(rule_id, None)
+    out = capsys.readouterr().out
+    assert "evidence  rigcheck:one" in out
+    assert " " * 10 + "official:two" in out
+    assert "docs" not in out
+
+
+def test_rule_doc_none_without_docs_folder(tmp_path: Path) -> None:
+    assert _rule_doc("suppression-no-reason", tmp_path / "missing") is None
+
+
+def test_every_registered_rule_has_an_area_doc() -> None:
+    missing = [rule_id for rule_id in REGISTRY if _rule_doc(rule_id, _RULE_DOCS) is None]
+    assert missing == []
