@@ -8,13 +8,19 @@ Check = Callable[[Rig], Iterable[Finding]]
 
 REGISTRY: dict[str, Rule] = {}
 
+PACKS = ("core", "advice", "house")
+"""Every rule belongs to exactly one of these packs; the tuple is their canonical listing order."""
+
+DEFAULT_PACKS = frozenset({"core", "advice"})
+"""The packs a run selects when ``--packs`` is not given; ``house`` is off unless named."""
+
 
 def rule(rule_id: str, pack: str, severity: Severity, fix: str, evidence: tuple[str, ...]) -> Callable[[Check], Check]:
     """Register the decorated check as a rule; its docstring's first line is the rule summary.
 
     Args:
         rule_id: The rule's slug id, such as ``import-unresolved``.
-        pack: The pack the rule belongs to, such as ``core``.
+        pack: The pack the rule belongs to; one of :data:`PACKS`.
         severity: The severity of every finding the rule emits.
         fix: The suggested fix shown with each finding.
         evidence: Research ids backing the rule, such as ``official:CM2``.
@@ -26,6 +32,8 @@ def rule(rule_id: str, pack: str, severity: Severity, fix: str, evidence: tuple[
     def register(check: Check) -> Check:
         if rule_id in REGISTRY:
             raise ValueError(f"rule {rule_id} is registered twice")
+        if pack not in PACKS:
+            raise ValueError(f"rule {rule_id} has unknown pack {pack!r}; packs are core, advice and house")
         doc = (check.__doc__ or "").strip()
         if not doc:
             raise ValueError(f"rule {rule_id} needs a docstring: its first line is the rule summary")

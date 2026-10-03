@@ -1,10 +1,13 @@
+import argparse
 import json
 from pathlib import Path
 
 import pytest
 
-from rigcheck import __version__
-from rigcheck.cli import main
+from rigcheck import __version__, engine
+from rigcheck.cli import _rules_to_run, main, parse_packs
+from rigcheck.model import Finding, Rig, Severity
+from rigcheck.rules import DEFAULT_PACKS, REGISTRY, rule
 from support import Workspace, write
 
 
@@ -142,3 +145,65 @@ def test_sibling_that_is_not_a_directory_is_a_usage_error(workspace: Workspace, 
         _check(workspace, workspace.rig(), "--sibling", str(workspace.rig("server")), "--sibling", str(missing))
     assert exit_info.value.code == 2
     assert f"--sibling is not a directory: {missing}" in capsys.readouterr().err
+
+
+def test_packs_unknown_name_exits_2(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        _check(workspace, workspace.rig(), "--packs", "extra")
+    assert exit_info.value.code == 2
+    assert "unknown pack 'extra'" in capsys.readouterr().err
+
+
+def test_packs_parses_list() -> None:
+    assert parse_packs("core, house") == {"core", "house"}
+    for value in ("", "core,", "core,,house"):
+        with pytest.raises(argparse.ArgumentTypeError) as excinfo:
+            parse_packs(value)
+        assert str(excinfo.value) == f"empty pack name in {value!r}; give packs like core,advice"
+
+
+def _register_house_rule() -> str:
+    def check(rig: Rig) -> tuple[Finding, ...]:
+        """A throwaway check that yields no findings."""
+        return ()
+
+    rule_id = "packs-house-throwaway"
+    rule(rule_id, "house", Severity.INFO, "Fix it.", ("rigcheck:packs",))(check)
+    return rule_id
+
+
+def test_rules_to_run_default_excludes_house() -> None:
+    rule_id = _register_house_rule()
+    try:
+        ids = {r.id for r in _rules_to_run(DEFAULT_PACKS, None)}
+    finally:
+        REGISTRY.pop(rule_id, None)
+    assert rule_id not in ids
+    assert "reference-path-missing" in ids
+
+
+def test_rules_to_run_only_wins() -> None:
+    rule_id = _register_house_rule()
+    try:
+        ids = {r.id for r in _rules_to_run(DEFAULT_PACKS, frozenset({rule_id}))}
+    finally:
+        REGISTRY.pop(rule_id, None)
+    assert rule_id in ids
+
+
+def test_rules_to_run_always_includes_engine_rules() -> None:
+    ids = {r.id for r in _rules_to_run(frozenset({"house"}), None)}
+    assert ids >= engine.UNSUPPRESSIBLE
+
+
+def test_packs_house_skips_core_rules_and_their_suppressions(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rig = _warn_rig(workspace)
+    _suppress(rig, 'rule = "reference-path-missing"\nreason = "moved"\n')
+    _check(workspace, rig, "--format", "json")
+    assert json.loads(capsys.readouterr().out)["summary"]["suppressed"] == 1
+    _check(workspace, rig, "--format", "json", "--packs", "house")
+    report = json.loads(capsys.readouterr().out)
+    rules = [finding["rule"] for finding in report["findings"]]
+    assert "reference-path-missing" not in rules
+    assert "suppression-unused" not in rules
+    assert report["summary"]["suppressed"] == 0
