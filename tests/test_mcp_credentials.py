@@ -1,8 +1,12 @@
-"""The remote-blanked predicate: the fixed name list and each name pattern Claude Code uses toward a remote server."""
+"""The remote-blanked predicate: the fixed name lists and each name pattern Claude Code uses toward a remote server."""
 
 import pytest
 
-from rigcheck.rules.mcp_credentials import _REMOTE_BLANKED, remote_blanked
+from rigcheck.rules.mcp_credentials import _PLAIN_BARE, _PLAIN_INPUT, _REMOTE_INPUT, plain_blanked, remote_blanked
+
+BLANKED_ANYWHERE = sorted(_PLAIN_BARE | _PLAIN_INPUT | _REMOTE_INPUT)
+BLANKED_WITH_INPUT_PREFIX = sorted(_PLAIN_INPUT | _REMOTE_INPUT)
+BLANKED_BARE_ONLY = sorted(_PLAIN_BARE - _REMOTE_INPUT)
 
 # Blanked and not-blanked examples, grouped by the pattern that decides them, per the probe in
 # docs/research/mcp-credential-blanking.md.
@@ -52,7 +56,14 @@ def test_remote_blanked_non_matches(name: str) -> None:
 
 
 def test_every_listed_name_is_blanked_in_any_case_and_with_input_prefix() -> None:
-    for name in _REMOTE_BLANKED:
+    for name in BLANKED_ANYWHERE:
         assert remote_blanked(name)
         assert remote_blanked(name.lower())
+    for name in BLANKED_WITH_INPUT_PREFIX:
         assert remote_blanked("INPUT_" + name)
+
+
+def test_plain_bare_names_are_not_blanked_with_input_prefix() -> None:
+    for name in BLANKED_BARE_ONLY:
+        assert not remote_blanked("INPUT_" + name)
+        assert not plain_blanked("INPUT_" + name)

@@ -145,6 +145,11 @@ def test_credential_stdio_silent(workspace: Workspace) -> None:
         ("MCP_CLIENT_SECRET", True),
         ("npm_token", True),
         ("INPUT_NPM_TOKEN", True),
+        ("INPUT_CLAUDE_CODE_OAUTH_TOKEN", True),
+        ("INPUT_MCP_CLIENT_SECRET", True),
+        ("CLAUDE_CODE_SESSION_NAME", True),
+        ("CLAUDE_BG_BACKEND", True),
+        ("INPUT_CLAUDE_BG_RV_AUTH", False),
         ("CARGO_REGISTRIES_MY_TOKEN", True),
         ("OTEL_EXPORTER_OTLP_HEADERS", True),
         ("GIT_CONFIG_VALUE_0", True),
@@ -170,6 +175,120 @@ def test_credential_message_omits_value(workspace: Workspace) -> None:
     messages = _messages(workspace, "mcp-credential-var-remote", _remote("ANTHROPIC_API_KEY"))
     assert messages
     assert all("Bearer" not in message for message in messages)
+
+
+def test_credential_case_variants_one_finding(workspace: Workspace) -> None:
+    servers = {"api": {"type": "http", "url": "https://x.test/mcp?a=${otel_x}&b=${OTEL_X}"}}
+    findings = _repo_mcp(workspace, "mcp-credential-var-remote", servers)
+    assert len(findings) == 1
+    assert "`otel_x`" in findings[0][0]
+
+
+def _stdio_args(variable: str) -> dict[str, object]:
+    """Return a stdio server whose ``args`` reference ``variable``."""
+    return {"api": {"command": "node", "args": ["--key", f"${{{variable}}}"]}}
+
+
+def _stdio_message(variable: str, field: str) -> str:
+    """Return the finding message for ``variable`` in ``field`` of server ``api``."""
+    return (
+        f"server `api` references `{variable}` in its {field}; "
+        "Claude Code reads that variable as empty in a stdio server whenever it is set, so the server never gets its value"
+    )
+
+
+def test_stdio_credential_reports_env(workspace: Workspace) -> None:
+    repo = workspace.rig()
+    write(repo / "CLAUDE.md", "# Project\n")
+    body = (
+        "{\n"
+        '  "mcpServers": {\n'
+        '    "api": {\n'
+        '      "command": "node",\n'
+        '      "env": {\n'
+        '        "A": "x",\n'
+        '        "KEY": "${MCP_CLIENT_SECRET}"\n'
+        "      }\n"
+        "    }\n"
+        "  }\n"
+        "}\n"
+    )
+    write(repo / ".mcp.json", body)
+    assert _run(workspace, "mcp-credential-var-stdio") == [(_stdio_message("MCP_CLIENT_SECRET", "env"), 7)]
+
+
+def test_stdio_credential_reports_args(workspace: Workspace) -> None:
+    assert _messages(workspace, "mcp-credential-var-stdio", _stdio_args("MCP_CLIENT_SECRET")) == [_stdio_message("MCP_CLIENT_SECRET", "args")]
+
+
+def test_stdio_credential_reports_command(workspace: Workspace) -> None:
+    servers = {"api": {"command": "run-${CLAUDE_CODE_OAUTH_TOKEN}"}}
+    assert _messages(workspace, "mcp-credential-var-stdio", servers) == [_stdio_message("CLAUDE_CODE_OAUTH_TOKEN", "command")]
+
+
+def test_stdio_credential_default_form_counts(workspace: Workspace) -> None:
+    servers = {"api": {"command": "node", "args": ["--key", "${OTEL_X:-D}"]}}
+    assert _messages(workspace, "mcp-credential-var-stdio", servers) == [_stdio_message("OTEL_X", "args")]
+
+
+def test_stdio_credential_lowercase_counts(workspace: Workspace) -> None:
+    assert _messages(workspace, "mcp-credential-var-stdio", _stdio_args("otel_foo")) == [_stdio_message("otel_foo", "args")]
+
+
+def test_stdio_credential_case_variants_one_finding(workspace: Workspace) -> None:
+    servers = {"api": {"command": "node", "args": ["${otel_x}", "${OTEL_X}"]}}
+    findings = _repo_mcp(workspace, "mcp-credential-var-stdio", servers)
+    assert len(findings) == 1
+    assert "`otel_x`" in findings[0][0]
+
+
+def test_stdio_credential_remote_server_silent(workspace: Workspace) -> None:
+    servers = {"api": {"type": "http", "url": "https://x.test/mcp?k=${OTEL_X}"}}
+    assert _repo_mcp(workspace, "mcp-credential-var-stdio", servers) == []
+    assert len(_repo_mcp(workspace, "mcp-credential-var-remote", servers)) == 1
+
+
+def test_stdio_credential_untyped_server_is_stdio(workspace: Workspace) -> None:
+    servers = {"api": {"command": "node", "args": ["--key", "${MCP_CLIENT_SECRET}"]}}
+    assert len(_repo_mcp(workspace, "mcp-credential-var-stdio", servers)) == 1
+
+
+def test_stdio_credential_skips_sdk_and_unknown_type(workspace: Workspace) -> None:
+    for kind in ("sdk", "foo", 3):
+        servers = {"api": {"type": kind, "command": "node", "args": ["${MCP_CLIENT_SECRET}"]}}
+        assert _repo_mcp(workspace, "mcp-credential-var-stdio", servers) == []
+
+
+@pytest.mark.parametrize(
+    ("variable", "fires"),
+    [
+        ("CLAUDE_CODE_OAUTH_TOKEN", True),
+        ("CLAUDE_CODE_SESSION_NAME", True),
+        ("MCP_CLIENT_SECRET", True),
+        ("INPUT_MCP_CLIENT_SECRET", True),
+        ("CLAUDE_CODE_MEMORY_API_TOKEN", True),
+        ("INPUT_OTEL_Y", True),
+        ("CLAUDE_CODE_ARTIFACTS_FOO_BASE_URL", True),
+        ("ANTHROPIC_API_KEY", False),
+        ("ANTHROPIC_AUTH_TOKEN", False),
+        ("ANTHROPIC_CUSTOM_HEADERS", False),
+        ("NPM_TOKEN", False),
+        ("INPUT_NPM_TOKEN", False),
+        ("AWS_SECRET_ACCESS_KEY", False),
+        ("INPUT_CLAUDE_CODE_OAUTH_TOKEN", False),
+        ("INPUT_CLAUDE_CODE_SLACK_TAG_TOKEN", False),
+        ("GITHUB_TOKEN", False),
+    ],
+)
+def test_stdio_credential_names(workspace: Workspace, variable: str, *, fires: bool) -> None:
+    assert bool(_repo_mcp(workspace, "mcp-credential-var-stdio", _stdio_args(variable))) is fires
+
+
+def test_stdio_credential_message_omits_value(workspace: Workspace) -> None:
+    servers = {"api": {"command": "node", "args": ["--key", "${MCP_CLIENT_SECRET:-hunter2}"]}}
+    messages = _messages(workspace, "mcp-credential-var-stdio", servers)
+    assert messages
+    assert all("hunter2" not in message for message in messages)
 
 
 def _token() -> str:
