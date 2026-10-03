@@ -1,17 +1,82 @@
-"""The variables Claude Code 2.1.288 expands to the empty string in a remote MCP server's ``url`` and ``headers``.
+"""The variables Claude Code 2.1.288 expands to the empty string in an MCP server's fields.
 
-See ``docs/research/mcp-credential-blanking.md`` for the probe this encodes.
+Claude Code blanks one set of names in every server, stdio included, and a wider set toward a
+remote server's ``url`` and ``headers``. See ``docs/research/mcp-credential-blanking.md`` for the
+probe this encodes.
 """
 
 import re
 
-_REMOTE_BLANKED: frozenset[str] = frozenset(
+_PLAIN_BARE: frozenset[str] = frozenset(
+    {
+        "AGENT_PROXY_AUTH_TOKEN",
+        "CLAUDE_BG_AUTH_SNAPSHOT_PATH",
+        "CLAUDE_BG_AUTO_MEMORY_OFF",
+        "CLAUDE_BG_BACKEND",
+        "CLAUDE_BG_CLAIM_AUTH",
+        "CLAUDE_BG_DISPATCHER_RATE_LIMIT_TIER",
+        "CLAUDE_BG_DISPATCHER_SUBSCRIPTION_TYPE",
+        "CLAUDE_BG_ISOLATION",
+        "CLAUDE_BG_MEMORY_TOGGLED_OFF",
+        "CLAUDE_BG_POST_CLEAR_RESPAWN",
+        "CLAUDE_BG_PTY_AUTH",
+        "CLAUDE_BG_RV_AUTH",
+        "CLAUDE_BG_SESSION_PERMISSION_RULES",
+        "CLAUDE_BG_SOCKET_TOKENS_PATH",
+        "CLAUDE_BG_SOURCE",
+        "CLAUDE_BG_WORKSPACE_TRUSTED",
+        "CLAUDE_BRIDGE_OAUTH_TOKEN",
+        "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
+        "CLAUDE_CODE_ARTIFACTS_API_TOKEN",
+        "CLAUDE_CODE_BRIDGE_CHILD_ARTIFACT",
+        "CLAUDE_CODE_BRIDGE_CHILD_AUTO_DEFAULT",
+        "CLAUDE_CODE_BRIDGE_CHILD_MACHINE_SETTINGS",
+        "CLAUDE_CODE_CONFIG_PROBE",
+        "CLAUDE_CODE_GATEWAY_TOKEN_FILE_DESCRIPTOR",
+        "CLAUDE_CODE_HFI_BEARER_TOKEN",
+        "CLAUDE_CODE_HOST_PROMPT_SUPERSEDES_RECORD",
+        "CLAUDE_CODE_MCP_SERVE_AUTH_TOKEN",
+        "CLAUDE_CODE_MCP_SERVE_SETTINGS",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+        "CLAUDE_CODE_PLUGIN_ATTRIBUTION",
+        "CLAUDE_CODE_RATE_LIMIT_TIER",
+        "CLAUDE_CODE_RELAUNCH_HOME_TRUST",
+        "CLAUDE_CODE_RESUME_INTERRUPTED_TURN",
+        "CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS",
+        "CLAUDE_CODE_RESUME_PROMPT",
+        "CLAUDE_CODE_RESUME_REASON",
+        "CLAUDE_CODE_RESUME_SOURCE_ALIVE",
+        "CLAUDE_CODE_SESSION_KIND",
+        "CLAUDE_CODE_SESSION_NAME",
+        "CLAUDE_CODE_SKILL_ATTRIBUTION",
+        "CLAUDE_CODE_SLACK_TAG_TOKEN",
+        "CLAUDE_CODE_SUBSCRIPTION_TYPE",
+        "CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR",
+        "CLAUDE_TRUSTED_DEVICE_TOKEN",
+    }
+)
+
+_PLAIN_INPUT: frozenset[str] = frozenset(
+    {
+        "CLAUDE_CODE_HOST_CREDS_FILE",
+        "CLAUDE_CODE_MESSAGING_TOKEN",
+        "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
+        "CLAUDE_SESSION_INGRESS_TOKEN_FILE",
+        "ENVIRONMENT_SERVICE_KEY",
+        "MCP_CLIENT_SECRET",
+        "MCP_XAA_IDP_CLIENT_SECRET",
+        "SELF_HOSTED_RUNNER_ENVIRONMENT_SECRET",
+        "SELF_HOSTED_RUNNER_POOL_SECRET",
+    }
+)
+
+_REMOTE_INPUT: frozenset[str] = frozenset(
     {
         "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
         "ACTIONS_ID_TOKEN_REQUEST_URL",
         "ACTIONS_RUNTIME_TOKEN",
         "ACTIONS_RUNTIME_URL",
-        "AGENT_PROXY_AUTH_TOKEN",
         "ALL_INPUTS",
         "ALL_PROXY",
         "ANACONDA_API_TOKEN",
@@ -43,30 +108,13 @@ _REMOTE_BLANKED: frozenset[str] = frozenset(
         "CARGO_REGISTRY_TOKEN",
         "CI_DEPLOY_USER",
         "CI_REGISTRY_USER",
-        "CLAUDE_BG_AUTH_SNAPSHOT_PATH",
-        "CLAUDE_BG_CLAIM_AUTH",
-        "CLAUDE_BG_PTY_AUTH",
-        "CLAUDE_BG_RV_AUTH",
-        "CLAUDE_BG_SOCKET_TOKENS_PATH",
-        "CLAUDE_BRIDGE_OAUTH_TOKEN",
-        "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
         "CLAUDE_CODE_ARTIFACTS_API_TOKEN",
         "CLAUDE_CODE_CLIENT_CERT",
         "CLAUDE_CODE_CLIENT_KEY",
         "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
-        "CLAUDE_CODE_GATEWAY_TOKEN_FILE_DESCRIPTOR",
-        "CLAUDE_CODE_HFI_BEARER_TOKEN",
-        "CLAUDE_CODE_HOST_CREDS_FILE",
-        "CLAUDE_CODE_MCP_SERVE_AUTH_TOKEN",
         "CLAUDE_CODE_MEMORY_API_TOKEN",
-        "CLAUDE_CODE_MESSAGING_TOKEN",
-        "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
         "CLAUDE_CODE_OAUTH_TOKEN",
-        "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
         "CLAUDE_CODE_SLACK_TAG_TOKEN",
-        "CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR",
-        "CLAUDE_SESSION_INGRESS_TOKEN_FILE",
-        "CLAUDE_TRUSTED_DEVICE_TOKEN",
         "CLOUDSDK_AUTH_ACCESS_TOKEN",
         "CLOUDSDK_AUTH_ACCESS_TOKEN_FILE",
         "CLOUDSDK_AUTH_AUTHORIZATION_TOKEN_FILE",
@@ -79,7 +127,6 @@ _REMOTE_BLANKED: frozenset[str] = frozenset(
         "DEFAULT_WORKFLOW_TOKEN",
         "DISCORD_WEBHOOK",
         "DISCORD_WEBHOOK_URL",
-        "ENVIRONMENT_SERVICE_KEY",
         "FASTLANE_SESSION",
         "FLIT_PASSWORD",
         "FLIT_USERNAME",
@@ -99,8 +146,6 @@ _REMOTE_BLANKED: frozenset[str] = frozenset(
         "MATURIN_PASSWORD",
         "MATURIN_PYPI_TOKEN",
         "MATURIN_USERNAME",
-        "MCP_CLIENT_SECRET",
-        "MCP_XAA_IDP_CLIENT_SECRET",
         "MSI_SECRET",
         "MS_TEAMS_WEBHOOK_URI",
         "NODE_AUTH_TOKEN",
@@ -113,8 +158,6 @@ _REMOTE_BLANKED: frozenset[str] = frozenset(
         "PIP_INDEX_URL",
         "PYPI_API_TOKEN",
         "PYPI_TOKEN",
-        "SELF_HOSTED_RUNNER_ENVIRONMENT_SECRET",
-        "SELF_HOSTED_RUNNER_POOL_SECRET",
         "SLACK_WEBHOOK",
         "SLACK_WEBHOOK_URL",
         "SONARQUBE_SCANNER_PARAMS",
@@ -150,7 +193,9 @@ _TN = (
 
 _CONN = r"CONN(?:ECT(?:ION)?)?_?STR(?:ING)?S?(?=\Z|[_0-9])"
 
-_TELEMETRY = re.compile(r"OTEL_.*|CLAUDE_CODE_OTEL_DIAG_STDERR|CLAUDE_CODE_ARTIFACT.*_BASE_URL|CLAUDE_CODE_MEMORY_API_(?:BASE_URL|TOKEN)", re.ASCII)
+_PLAIN_PATTERN = re.compile(
+    r"OTEL_.*|CLAUDE_CODE_OTEL_DIAG_STDERR|CLAUDE_CODE_ARTIFACT.*_BASE_URL|CLAUDE_CODE_MEMORY_API_(?:BASE_URL|TOKEN)", re.ASCII
+)
 
 _GIT_CONFIG = re.compile(r"GIT_CONFIG_(?:PARAMETERS|(?:KEY|VALUE)_[0-9]+)", re.ASCII)
 
@@ -169,6 +214,21 @@ _BUNDLER_HOST = re.compile(
 )
 
 
+def plain_blanked(name: str) -> bool:
+    """Return whether Claude Code expands a reference to ``name`` to the empty string in every MCP server.
+
+    Args:
+        name: The variable name as written, in any case, with or without a leading ``INPUT_``.
+
+    Returns:
+        True when Claude Code reads the variable as empty in a stdio server's ``command``, ``args``
+        or ``env``, and toward a remote server's ``url`` and ``headers`` as well.
+    """
+    upper = name.upper()
+    bare = upper.removeprefix("INPUT_")
+    return upper in _PLAIN_BARE or bare in _PLAIN_INPUT or bool(_PLAIN_PATTERN.fullmatch(bare))
+
+
 def remote_blanked(name: str) -> bool:
     """Return whether Claude Code expands a reference to ``name`` to the empty string toward a remote server.
 
@@ -178,13 +238,11 @@ def remote_blanked(name: str) -> bool:
     Returns:
         True when Claude Code reads the variable as empty in a server's ``url`` or ``headers``.
     """
-    upper = name.upper()
-    bare = upper.removeprefix("INPUT_")
-    if bare in _REMOTE_BLANKED:
+    if plain_blanked(name):
         return True
-    return bool(
-        _TELEMETRY.fullmatch(bare)
-        or _GIT_CONFIG.fullmatch(bare)
+    bare = name.upper().removeprefix("INPUT_")
+    return bare in _REMOTE_INPUT or bool(
+        _GIT_CONFIG.fullmatch(bare)
         or _CARGO_REGISTRY.fullmatch(bare)
         or _PACKAGE_CREDENTIAL.match(bare.replace("-", "_"))
         or _BUNDLER_HOST.match(bare)

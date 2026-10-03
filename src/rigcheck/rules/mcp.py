@@ -1,8 +1,9 @@
 """Rules for MCP server definitions: transport type, unexpanded references, credential literals and scope conflicts.
 
 A server's ``type`` must be one Claude Code accepts. A project ``.mcp.json`` must give
-``${CLAUDE_PROJECT_DIR}`` a default in ``command`` and ``args``, and a remote server's ``url`` and
-``headers`` must not reference a variable Claude Code reads as empty there. A
+``${CLAUDE_PROJECT_DIR}`` a default in ``command`` and ``args``, a remote server's ``url`` and
+``headers`` must not reference a variable Claude Code reads as empty there, and a stdio server's
+``command``, ``args`` and ``env`` must not reference one Claude Code blanks in every server. A
 git-tracked project file or a plugin config must not hold a credential literal in ``env``,
 ``headers``, ``args`` or ``url``, and the same server name defined in a project file and in
 ``~/.claude.json`` with a different endpoint is a conflict.
@@ -16,7 +17,7 @@ from rigcheck.parse import config
 from rigcheck.parse.secrets import SecretHit, find_secrets
 from rigcheck.rules import emit, rule
 from rigcheck.rules.config import McpServer, McpSource, mcp_servers
-from rigcheck.rules.mcp_credentials import remote_blanked
+from rigcheck.rules.mcp_credentials import plain_blanked, remote_blanked
 
 _REFERENCE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(:-[^}]*)?\}")
 """A ``${NAME}`` or ``${NAME:-default}`` reference; a bare ``$NAME`` is not expanded in ``.mcp.json``."""
@@ -116,6 +117,17 @@ def _is_remote(value: Mapping[str, object]) -> bool:
     return "url" in value
 
 
+def _is_stdio(value: Mapping[str, object]) -> bool:
+    """Return whether Claude Code runs a server over stdio: no ``type`` key, or the string ``stdio``.
+
+    A server whose ``type`` is any other value, string or not, is neither remote nor stdio;
+    ``mcp-type-invalid`` reports it.
+    """
+    if "type" in value:
+        return value["type"] == "stdio"
+    return "url" not in value
+
+
 def _string_values(value: object) -> Iterator[tuple[str, str]]:
     """Yield each string value of a JSON object under its string key, in written order."""
     if not isinstance(value, dict):
@@ -135,13 +147,18 @@ def _field_texts(value: Mapping[str, object]) -> Iterator[tuple[str, str]]:
 
 
 def _credential_references(value: Mapping[str, object]) -> list[tuple[str, str]]:
-    """Return each ``(field, variable)`` credential reference once, in the order first written."""
-    found: dict[tuple[str, str], None] = {}
+    """Return each ``(field, variable)`` credential reference once, in the order first written.
+
+    Names are compared upper-cased, as Claude Code compares them, so two spellings of one name in a
+    field report once, under the first spelling written.
+    """
+    found: dict[tuple[str, str], str] = {}
     for field, text in _field_texts(value):
         for match in _REFERENCE.finditer(text):
-            if remote_blanked(match.group(1)):
-                found.setdefault((field, match.group(1)))
-    return list(found)
+            variable = match.group(1)
+            if remote_blanked(variable):
+                found.setdefault((field, variable.upper()), variable)
+    return [(field, variable) for (field, _upper), variable in found.items()]
 
 
 @rule(
@@ -163,6 +180,60 @@ def mcp_credential_var_remote(rig: Rig) -> Iterator[Finding]:
                 "Claude Code reads that variable as empty there, so the server gets none"
             )
             yield emit("mcp-credential-var-remote", server.artifact, message, _key_line(rig, server, field))
+
+
+def _stdio_field_texts(value: Mapping[str, object]) -> Iterator[tuple[str, tuple[str, ...], str]]:
+    """Yield ``(field, keys, text)`` for a stdio server's ``command``, each ``args`` item and each ``env`` value.
+
+    ``keys`` is the entry key of one ``env`` value, and empty for ``command`` and ``args``.
+    """
+    command = value.get("command")
+    if isinstance(command, str):
+        yield "command", (), command
+    args = value.get("args")
+    if isinstance(args, list):
+        for item in args:
+            if isinstance(item, str):
+                yield "args", (), item
+    for key, text in _string_values(value.get("env")):
+        yield "env", (key,), text
+
+
+def _stdio_references(value: Mapping[str, object]) -> list[tuple[str, tuple[str, ...], str]]:
+    """Return each ``(field, keys, variable)`` a stdio server references that Claude Code blanks, once.
+
+    Names are compared upper-cased, as Claude Code compares them, so two spellings of one name in a
+    field report once, under the first spelling written.
+    """
+    found: dict[tuple[str, str], tuple[str, tuple[str, ...], str]] = {}
+    for field, keys, text in _stdio_field_texts(value):
+        for match in _REFERENCE.finditer(text):
+            variable = match.group(1)
+            if plain_blanked(variable):
+                found.setdefault((field, variable.upper()), (field, keys, variable))
+    return list(found.values())
+
+
+@rule(
+    "mcp-credential-var-stdio",
+    "core",
+    Severity.WARN,
+    "Do not pass a variable Claude Code blanks in every MCP server (its own session tokens and state, "
+    "MCP_CLIENT_SECRET-type secrets, OTEL_* telemetry settings) through a stdio server's command, args or env; "
+    "the server receives an empty value whenever the variable is set.",
+    ("rigcheck:mcp-blanking-probe",),
+)
+def mcp_credential_var_stdio(rig: Rig) -> Iterator[Finding]:
+    """A stdio MCP server references a variable that Claude Code blanks in every server."""
+    for server, value in _configured(rig):
+        if not _is_stdio(value):
+            continue
+        for field, keys, variable in _stdio_references(value):
+            message = (
+                f"server `{server.name}` references `{variable}` in its {field}; "
+                "Claude Code reads that variable as empty in a stdio server whenever it is set, so the server never gets its value"
+            )
+            yield emit("mcp-credential-var-stdio", server.artifact, message, _key_line(rig, server, field, *keys))
 
 
 def _args_text(value: object) -> str | None:
