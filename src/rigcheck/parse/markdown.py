@@ -552,6 +552,96 @@ def prose_segments(text: str, start_line: int) -> list[tuple[int, str]]:
     return found
 
 
+def _first_line(token: Token, start_line: int) -> int | None:
+    """Return the 1-based line ``token`` starts on, or None when it has no position or starts before ``start_line``."""
+    if token.map is None or not _from(token, start_line):
+        return None
+    return token.map[0] + 1
+
+
+def top_level_ordered_lists(text: str, start_line: int) -> list[tuple[int, int]]:
+    """Return each numbered list that is not nested in another block, with its count of direct items.
+
+    Args:
+        text: The file content.
+        start_line: The 1-based line the body starts on; lists that start before it are skipped.
+
+    Returns:
+        ``(line, items)`` pairs in document order: the list's first line and the number of its own items; a list
+        nested inside an item is neither reported nor counted as items.
+    """
+    found: list[tuple[int, int]] = []
+    current: list[int] | None = None
+    for token in _tokens(text):
+        line = _first_line(token, start_line)
+        if token.type == "ordered_list_open" and token.level == 0 and line is not None:
+            current = [line, 0]
+        elif current is not None and token.type == "list_item_open" and token.level == 1:
+            current[1] += 1
+        elif current is not None and token.type == "ordered_list_close" and token.level == 0:
+            found.append((current[0], current[1]))
+            current = None
+    return found
+
+
+def top_level_paragraphs(text: str, start_line: int) -> list[tuple[int, str]]:
+    """Return each paragraph that is not inside a list item or blockquote, with code spans blanked.
+
+    Args:
+        text: The file content.
+        start_line: The 1-based line the body starts on; paragraphs that start before it are skipped.
+
+    Returns:
+        ``(line, text)`` pairs in document order: the paragraph's first line and its source, code spans and other
+        non-prose replaced by spaces of the same length (see :func:`prose_segments`).
+    """
+    tokens = _tokens(text)
+    found: list[tuple[int, str]] = []
+    for index, token in enumerate(tokens):
+        line = _first_line(token, start_line)
+        if token.type == "paragraph_open" and token.level == 0 and line is not None:
+            found.append((line, _blank_spans(tokens[index + 1])))
+    return found
+
+
+_STRUCTURE = frozenset({"heading_open", "bullet_list_open", "ordered_list_open"})
+
+
+def structure_count(text: str, start_line: int) -> int:
+    """Count the headings and lists of a Markdown file, nested ones included.
+
+    Args:
+        text: The file content.
+        start_line: The 1-based line the body starts on; blocks that start before it are skipped.
+
+    Returns:
+        The number of headings, bullet lists and numbered lists.
+    """
+    return sum(1 for token in _tokens(text) if token.type in _STRUCTURE and _from(token, start_line))
+
+
+def code_blocks(text: str, start_line: int) -> list[tuple[int, list[str]]]:
+    """Return each fenced and indented code block of a Markdown file, nested ones included.
+
+    Args:
+        text: The file content.
+        start_line: The 1-based line the body starts on; blocks that start before it are skipped.
+
+    Returns:
+        ``(line, lines)`` pairs in document order: the block's first content line and its content split into lines,
+        without the empty string a trailing newline leaves.
+    """
+    found: list[tuple[int, list[str]]] = []
+    for token in _tokens(text):
+        line = _first_line(token, start_line)
+        if token.type in ("fence", "code_block") and line is not None:
+            lines = token.content.split("\n")
+            if lines and not lines[-1]:
+                lines.pop()
+            found.append((line + 1 if token.type == "fence" else line, lines))
+    return found
+
+
 def find_imports(text: str) -> list[Import]:
     """Find Claude Code ``@path`` imports outside code blocks and code spans.
 

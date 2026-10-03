@@ -7,11 +7,12 @@ from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import unquote
 
-from rigcheck.discover import AGENTS_MD, IGNORED_BY_CLAUDE, SKIP_DIRS, path_key
-from rigcheck.model import Artifact, Finding, Kind, Layer, LoadClass, Rig, Severity
+from rigcheck.discover import SKIP_DIRS, path_key
+from rigcheck.model import Artifact, Finding, Kind, Layer, Rig, Severity
 from rigcheck.parse.markdown import Reference, find_references
 from rigcheck.parse.shell import segments
 from rigcheck.rules import emit, rule
+from rigcheck.rules.components import maintained
 
 _SCRIPT_KINDS = (Kind.INSTRUCTIONS, Kind.NESTED_INSTRUCTIONS, Kind.RULE)
 """The kinds reference-script-missing scans."""
@@ -21,7 +22,6 @@ _PATH_KINDS = (*_SCRIPT_KINDS, *_READ_KINDS)
 """The kinds reference-path-missing scans: the instruction files plus the docs, skills, agents and commands agents read."""
 _LINE_RANGE = re.compile(r":\d+-\d+$")
 _SYMBOL = re.compile(r"(\.[A-Za-z0-9]+):[A-Za-z_][A-Za-z0-9_.]*$")
-_SCANNED_LAYERS = (Layer.REPO, Layer.USER)
 ALLOW_PATH_MARKER = "<!-- rigcheck: allow reference-path-missing -->"
 """A line holding this comment silences reference-path-missing on that line and the next."""
 _LINE_BREAK = re.compile(r"\r\n?|\n")
@@ -38,18 +38,6 @@ _KNOWN_SCHEMES = frozenset(
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=(\S*)$")
 _LOCATION = re.compile(r":\d+(?::\d+)?$")
 _HOST = re.compile(r"^[a-z0-9-]+(\.[a-z0-9-]+)*\.(com|org|net|io|dev|ai|app|co|gg|me|sh|xyz)$", re.IGNORECASE)
-
-
-def _scanned(rig: Rig, kinds: tuple[Kind, ...]) -> list[Artifact]:
-    """Files of ``kinds`` a user or project maintains, including an AGENTS.md only Codex reads."""
-    return [
-        a
-        for a in rig.artifacts
-        if a.kind in kinds
-        and a.layer in _SCANNED_LAYERS
-        and a.path.name not in IGNORED_BY_CLAUDE
-        and (a.load_class is not LoadClass.NOT_LOADED or a.path.name == AGENTS_MD)
-    ]
 
 
 def _allowed_lines(text: str) -> set[int]:
@@ -242,7 +230,7 @@ def _missing_path_message(rig: Rig, artifact: Artifact, reference: Reference, to
 )
 def reference_path_missing(rig: Rig) -> Iterator[Finding]:
     """A path in a code span or link names no file or folder."""
-    for artifact in _scanned(rig, _PATH_KINDS):
+    for artifact in maintained(rig, _PATH_KINDS):
         allowed = _allowed_lines(rig.text(artifact.path))
         for reference in _references(rig, artifact):
             token = path_candidate(reference) if reference.line not in allowed else None
@@ -447,7 +435,7 @@ def _missing_scripts(manifests: _Manifests, artifact: Artifact, reference: Refer
 def reference_script_missing(rig: Rig) -> Iterator[Finding]:
     """A ``npm run``, ``just`` or ``make`` command names a script, recipe or target that is not defined."""
     manifests = _Manifests(rig)
-    for artifact in _scanned(rig, _SCRIPT_KINDS):
+    for artifact in maintained(rig, _SCRIPT_KINDS):
         if artifact.layer is not Layer.REPO:
             continue
         for reference in _references(rig, artifact):

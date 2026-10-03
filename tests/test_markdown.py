@@ -2,7 +2,19 @@ import pytest
 from markdown_it.token import Token
 
 from rigcheck.parse import frontmatter, markdown
-from rigcheck.parse.markdown import Injection, Reference, find_imports, find_injections, find_references, prose_segments, strip_html_comments
+from rigcheck.parse.markdown import (
+    Injection,
+    Reference,
+    code_blocks,
+    find_imports,
+    find_injections,
+    find_references,
+    prose_segments,
+    strip_html_comments,
+    structure_count,
+    top_level_ordered_lists,
+    top_level_paragraphs,
+)
 from rigcheck.parse.tokens import estimate
 
 
@@ -475,3 +487,43 @@ def test_prose_segments_keep_offsets_across_a_multiline_span() -> None:
 
 def test_prose_segments_skip_tokens_before_the_start_line() -> None:
     assert prose_segments("---\nprice: $1\n---\nBody $2\n", 4) == [(4, "Body $2")]
+
+
+def test_top_level_ordered_lists_counts_direct_items() -> None:
+    items = ["1. a", "2. b", "3. c", "   1. a", "   2. b", "4. d", "5. e", "6. f", "7. g", "8. h", "9. i"]
+    text = "intro\n\n" + "\n".join(items) + "\n"
+    assert top_level_ordered_lists(text, 1) == [(3, 9)]
+
+
+def test_top_level_ordered_lists_skips_fenced_list() -> None:
+    assert top_level_ordered_lists("```\n1. x\n2. y\n```\n", 1) == []
+
+
+def test_top_level_paragraphs_excludes_list_items() -> None:
+    text = "A short paragraph.\n\n- " + "word " * 200 + "\n"
+    assert top_level_paragraphs(text, 1) == [(1, "A short paragraph.")]
+
+
+def test_top_level_paragraphs_blanks_code_spans() -> None:
+    assert top_level_paragraphs("a `b c d` e\n", 1) == [(1, "a " + " " * len("`b c d`") + " e")]
+
+
+def test_structure_count_counts_headings_and_lists() -> None:
+    assert structure_count("# h\n\n- x\n\n1. y\n", 1) == 3
+    assert structure_count("one\n\ntwo\n", 1) == 0
+
+
+def test_code_blocks_reads_a_fenced_block() -> None:
+    assert code_blocks("intro\n\n```sh\nmake\nmake test\n```\n", 1) == [(4, ["make", "make test"])]
+
+
+def test_code_blocks_reads_an_indented_block() -> None:
+    assert code_blocks("intro\n\n    one\n    two\n", 1) == [(3, ["one", "two"])]
+
+
+def test_code_blocks_finds_a_fence_in_a_list_item() -> None:
+    assert code_blocks("- step\n\n  ```\n  run\n  ```\n", 1) == [(4, ["run"])]
+
+
+def test_code_blocks_skips_blocks_before_the_start_line() -> None:
+    assert code_blocks("```\nold\n```\n\nbody\n\n```\nnew\n```\n", 4) == [(8, ["new"])]

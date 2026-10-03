@@ -15,5 +15,6 @@ One doc per rule area: what the area checks, its rule ids with severity and evid
 - [`secrets.md`](secrets.md): credential literals in instruction, memory, skill, command and agent files, and skills and commands that pipe a downloaded script into a shell.
 - [`duplication.md`](duplication.md): instructions that two every-turn files, or an AGENTS.md peer, both state.
 - [`suppressions.md`](suppressions.md): the repo's `.rigcheck.toml` suppression entries, how they are read, and a suppression with no reason.
+- [`advice.md`](advice.md): the info-only `advice` pack: style advice from the docs, cited with the study rows that bear on it.
 
 `internal-error` belongs to the engine: a rule that raises becomes one `internal-error` finding and the other rules still run.

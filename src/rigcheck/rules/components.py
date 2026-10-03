@@ -3,8 +3,10 @@
 import re
 from collections.abc import Iterator
 
-from rigcheck.model import Artifact, Finding, Kind, Layer, Rig, Severity
+from rigcheck.discover import AGENTS_MD, IGNORED_BY_CLAUDE
+from rigcheck.model import Artifact, Finding, Kind, Layer, LoadClass, Rig, Severity
 from rigcheck.parse import frontmatter
+from rigcheck.parse.markdown import prose_segments
 from rigcheck.rules import emit, rule
 
 _LINE_REFERENCE = re.compile(r"line (\d+), column")
@@ -95,6 +97,30 @@ def components(rig: Rig, kinds: tuple[Kind, ...]) -> list[Artifact]:
     return [artifact for artifact in rig.artifacts if artifact.kind in kinds]
 
 
+_SCANNED_LAYERS = (Layer.REPO, Layer.USER)
+
+
+def maintained(rig: Rig, kinds: tuple[Kind, ...]) -> list[Artifact]:
+    """Return the files of ``kinds`` a user or project maintains, including an AGENTS.md only Codex reads.
+
+    Args:
+        rig: The discovered setup.
+        kinds: The artifact kinds to keep.
+
+    Returns:
+        The repo- and user-layer artifacts of those kinds, in rig order, without the files Claude Code ignores
+        and without files it does not load other than AGENTS.md.
+    """
+    return [
+        a
+        for a in rig.artifacts
+        if a.kind in kinds
+        and a.layer in _SCANNED_LAYERS
+        and a.path.name not in IGNORED_BY_CLAUDE
+        and (a.load_class is not LoadClass.NOT_LOADED or a.path.name == AGENTS_MD)
+    ]
+
+
 def plugin_name(artifact: Artifact) -> str | None:
     """Return the name of the plugin ``artifact`` comes from, without its ``@marketplace``.
 
@@ -155,6 +181,19 @@ def load(rig: Rig, artifact: Artifact) -> frontmatter.Frontmatter:
         The parsed frontmatter, cached by text and shared between callers, so read-only.
     """
     return frontmatter.parse(rig.text(artifact.path))
+
+
+def body_prose(rig: Rig, artifact: Artifact) -> list[tuple[int, str]]:
+    """Return the prose lines of ``artifact``'s body, with code spans blanked (see :func:`prose_segments`).
+
+    Args:
+        rig: The discovered setup.
+        artifact: The file to read.
+
+    Returns:
+        ``(line, text)`` pairs from the line the body starts on, after any frontmatter.
+    """
+    return prose_segments(rig.text(artifact.path), load(rig, artifact).body_line)
 
 
 def normalise_key(key: str) -> str:
