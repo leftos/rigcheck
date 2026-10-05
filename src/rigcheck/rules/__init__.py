@@ -8,11 +8,16 @@ Check = Callable[[Rig], Iterable[Finding]]
 
 REGISTRY: dict[str, Rule] = {}
 
-PACKS = ("core", "advice", "house")
+PACKS = ("core", "advice", "house", "deep")
 """Every rule belongs to exactly one of these packs; the tuple is their canonical listing order."""
 
 DEFAULT_PACKS = frozenset({"core", "advice"})
-"""The packs a run selects when ``--packs`` is not given; ``house`` is off unless named."""
+"""The packs a run selects when ``--packs`` is not given; ``house`` is off unless named, ``deep`` unless named or ``--deep``."""
+
+
+def pack_list_text() -> str:
+    """Return every pack in :data:`PACKS` order as an English list, like ``core, advice, house and deep``."""
+    return f"{', '.join(PACKS[:-1])} and {PACKS[-1]}"
 
 
 def rule(rule_id: str, pack: str, severity: Severity, fix: str, evidence: tuple[str, ...]) -> Callable[[Check], Check]:
@@ -33,7 +38,7 @@ def rule(rule_id: str, pack: str, severity: Severity, fix: str, evidence: tuple[
         if rule_id in REGISTRY:
             raise ValueError(f"rule {rule_id} is registered twice")
         if pack not in PACKS:
-            raise ValueError(f"rule {rule_id} has unknown pack {pack!r}; packs are core, advice and house")
+            raise ValueError(f"rule {rule_id} has unknown pack {pack!r}; packs are {pack_list_text()}")
         doc = (check.__doc__ or "").strip()
         if not doc:
             raise ValueError(f"rule {rule_id} needs a docstring: its first line is the rule summary")

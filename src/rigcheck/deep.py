@@ -18,8 +18,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
-from rigcheck.model import Artifact, Finding, Kind, Layer, LoadClass, Rig, Verdict
+from rigcheck.model import Artifact, Finding, Layer, Rig, Verdict
 from rigcheck.rules import REGISTRY
+from rigcheck.rules.deep_common import deep_artifacts
 
 type Runner = Callable[[str, str], str]
 """Sends ``(prompt, json_schema_text)`` to Claude and returns its stdout."""
@@ -28,10 +29,6 @@ MODEL = "haiku"
 MAX_BYTES = 100_000
 TIMEOUT_S = 120
 SYSTEM_PROMPT = "You classify the coding-agent instruction text you are given and answer only with the structured output its schema asks for."
-
-DEEP_KINDS = (Kind.INSTRUCTIONS, Kind.NESTED_INSTRUCTIONS, Kind.RULE, Kind.SKILL, Kind.COMMAND, Kind.AGENT)
-"""The kinds of file ``--deep`` may send; settings, hooks, MCP, memory and plugin files never qualify."""
-_DEEP_LAYERS = (Layer.REPO, Layer.USER)
 
 
 @dataclass(frozen=True)
@@ -86,16 +83,6 @@ class DeepUnavailable(Exception):  # noqa: N818 - named for what the user lacks
     """``--deep`` cannot run on this machine."""
 
 
-def _selected(rig: Rig) -> list[Artifact]:
-    """Return the loaded deep-kind artifacts of the repo and user layers, the first per path, in rig order."""
-    chosen: dict[Path, Artifact] = {}
-    for artifact in rig.artifacts:
-        eligible = artifact.kind in DEEP_KINDS and artifact.layer in _DEEP_LAYERS and artifact.load_class is not LoadClass.NOT_LOADED
-        if eligible and artifact.path not in chosen:
-            chosen[artifact.path] = artifact
-    return list(chosen.values())
-
-
 def plan(rig: Rig, families: tuple[Family, ...]) -> Listing:
     """Decide which files ``--deep`` sends and which it holds back.
 
@@ -112,7 +99,7 @@ def plan(rig: Rig, families: tuple[Family, ...]) -> Listing:
     secrets = _secret_paths(rig)
     sent: list[tuple[Path, int]] = []
     not_sent: list[tuple[Path, str]] = []
-    for artifact in _selected(rig):
+    for artifact in deep_artifacts(rig).values():
         size = len(rig.text(artifact.path).encode("utf-8"))
         reason = _hold_back_reason(artifact.path, size, secrets)
         if reason is None:
@@ -275,7 +262,7 @@ def run(
     Returns:
         The verdicts grouped by family id, and the ``deep-error`` findings.
     """
-    artifacts = {artifact.path: artifact for artifact in _selected(rig)}
+    artifacts = deep_artifacts(rig)
     verdicts: dict[str, tuple[Verdict, ...]] = {}
     errors: list[Finding] = []
     for family in families:
