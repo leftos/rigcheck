@@ -493,7 +493,7 @@ def _bundle(rig: Rig, artifact: Artifact) -> _Bundle:
     nested = [link for path in depth_one for link in parsed.links(path, _LINKED)]
     spanned = _bundled_markdown(parsed.links(skill, ("span",)), root)
     sources = list({path_key(path): path for path in (skill, *depth_one, *spanned)}.values())
-    files = list(_bundled_files(rig, artifact))
+    files = list(bundled_files(rig, artifact))
     names = _names(rig, parsed, root, sources, files) if files else _Names(frozenset(), "")
     return _Bundle(artifact, top, nested, files, names)
 
@@ -638,8 +638,39 @@ def _ignored(rig: Rig, artifact: Artifact, path: Path) -> bool:
     return relative.as_posix() not in files
 
 
-def _bundled_files(rig: Rig, artifact: Artifact) -> Iterator[Path]:
-    """Yield the skill folder's regular files that Claude may be meant to read or run."""
+_BUNDLED_FILES: dict[int, tuple["weakref.ref[Rig]", dict[str, tuple[Path, ...]]]] = {}
+"""Each live rig's bundled files by skill, walked once and shared by every rule that reads them."""
+
+
+def _bundled_cache(rig: Rig) -> dict[str, tuple[Path, ...]]:
+    entry = _BUNDLED_FILES.get(id(rig))
+    if entry is not None and entry[0]() is rig:
+        return entry[1]
+    cache: dict[str, tuple[Path, ...]] = {}
+    _BUNDLED_FILES[id(rig)] = (weakref.ref(rig), cache)
+    weakref.finalize(rig, _BUNDLED_FILES.pop, id(rig), None)
+    return cache
+
+
+def bundled_files(rig: Rig, artifact: Artifact) -> tuple[Path, ...]:
+    """Return the skill folder's regular files that Claude may be meant to read or run, walking the folder once per rig.
+
+    Args:
+        rig: The discovered setup.
+        artifact: The skill's SKILL.md.
+
+    Returns:
+        Each file under the skill folder in walk order, without SKILL.md, top-level files for people (LICENSE, README, ...),
+        hidden files, bytecode, agent metadata, nested skills, virtual environments and files git ignores.
+    """
+    cache = _bundled_cache(rig)
+    key = path_key(artifact.path)
+    if key not in cache:
+        cache[key] = tuple(_walk_bundled(rig, artifact))
+    return cache[key]
+
+
+def _walk_bundled(rig: Rig, artifact: Artifact) -> Iterator[Path]:
     root = artifact.path.parent
     for directory, folders, files in os.walk(root):
         here = Path(directory)

@@ -51,13 +51,40 @@ def _every_turn(rig: Rig) -> list[Artifact]:
     return [artifact for artifact in maintained(rig, _EVERY_TURN_KINDS) if artifact.load_class is LoadClass.EVERY_TURN]
 
 
-def _body_lines(text: str, body_line: int) -> list[tuple[str, str]]:
-    """Each body line as written and as Claude Code loads it, with block HTML comments removed."""
+def body_lines(text: str, body_line: int) -> list[tuple[str, str]]:
+    """Return each line from ``body_line`` on as written and as Claude Code loads it, with block HTML comments removed.
+
+    Args:
+        text: The whole file content.
+        body_line: The 1-based line to start from.
+
+    Returns:
+        ``(written, loaded)`` pairs, one per line; a line inside a block HTML comment loads as an empty string.
+    """
     written = _LINE_BREAK.split(text)
     loaded = strip_html_comments(text).split("\n")
     if written[-1] == "":
         written, loaded = written[:-1], loaded[:-1]
     return list(zip(written[body_line - 1 :], loaded[body_line - 1 :], strict=True))
+
+
+def loaded_line_count(lines: list[tuple[str, str]]) -> int:
+    """Count the lines of :func:`body_lines` that Claude Code sees: blank lines count, block HTML comment lines do not."""
+    return sum(1 for written, loaded in lines if loaded.strip() or not written.strip())
+
+
+def body_line_count(rig: Rig, artifact: Artifact) -> int:
+    """Count the lines of ``artifact``'s body that Claude Code loads.
+
+    Args:
+        rig: The discovered setup.
+        artifact: The file to measure.
+
+    Returns:
+        The lines from the line the body starts on to the end of the file, without the lines that hold only a block
+        HTML comment; blank lines count.
+    """
+    return loaded_line_count(body_lines(rig.text(artifact.path), load(rig, artifact).body_line))
 
 
 @rule(
@@ -71,8 +98,7 @@ def _body_lines(text: str, body_line: int) -> list[tuple[str, str]]:
 def instructions_long(rig: Rig) -> Iterator[Finding]:
     """An instruction file runs past 200 lines."""
     for artifact in maintained(rig, _SIZED_KINDS):
-        lines = _body_lines(rig.text(artifact.path), load(rig, artifact).body_line)
-        count = sum(1 for written, loaded in lines if loaded.strip() or not written.strip())
+        count = body_line_count(rig, artifact)
         if count > _MAX_LINES:
             yield emit("instructions-long", artifact, f"{count} lines; Anthropic's guidance is under 200 per instruction file", None)
 

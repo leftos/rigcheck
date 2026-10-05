@@ -74,6 +74,7 @@ def emit_setup(rule_id: str, message: str) -> Finding:
 
 
 # Area modules register their rules on import; they need `rule`, `emit` and `emit_setup` defined above.
+import rigcheck.rules.advice_components  # noqa: E402 - imported for its registrations
 import rigcheck.rules.advice_instructions  # noqa: E402 - imported for its registrations
 import rigcheck.rules.agent_refs  # noqa: E402 - imported for its registrations
 import rigcheck.rules.agents  # noqa: E402 - imported for its registrations
