@@ -1,6 +1,6 @@
 # Advice pack
 
-The `advice` pack holds info-only style advice from Anthropic's docs. It runs by default with `core`; `--packs core` turns it off. Each rule cites the doc entry it encodes and, where `docs/research/sota.md` has one, the study row that bears on it, often a null result: a study that found no effect of the thing the advice is about. A finding here is a cost or maintenance note, never a claim that following the advice raises adherence. The rules are in `src/rigcheck/rules/advice_instructions.py` (instruction files) and `advice_components.py` (skills and agents).
+The `advice` pack holds info-only style advice from Anthropic's docs. It runs by default with `core`; `--packs core` turns it off. Each rule cites the doc entry it encodes and, where `docs/research/sota.md` has one, the study row that bears on it, often a null result: a study that found no effect of the thing the advice is about. A finding here is a cost or maintenance note, never a claim that following the advice raises adherence. The rules are in `src/rigcheck/rules/advice_instructions.py` (instruction files), `advice_components.py` (skills and agents) and `advice_other.py` (rule files, the memory index and prompt phrasing).
 
 ## Rules
 
@@ -19,11 +19,14 @@ The `advice` pack holds info-only style advice from Anthropic's docs. It runs by
 | `skill-backslash-path` | info | `official:SK13` |
 | `skill-time-sensitive-text` | info | `official:SK14` |
 | `agent-read-only-has-write-tools` | info | `official:AG10` |
+| `rule-filename-generic` | info | `official:RL5` |
+| `memory-index-shape` | info | `official:MM2` |
+| `prompt-reasoning-extraction` | info | `official:PR10` |
 
 ## The whole pack
 
 - Every advice rule is info, whatever severity `docs/research/official.md` suggests (it suggests warn for CM1, CM11 and PR4): `sota.md` §6 rules out line caps and emphasis as errors, and the catalog test enforces info for the pack.
-- Only the repo and user layers are checked (`components.maintained`). Plugin files are third-party, so style advice on them is noise.
+- Only the repo and user layers are checked (`components.maintained`), plus the memory layer for `memory-index-shape` and `prompt-reasoning-extraction`, since memory loads every turn. Plugin files are third-party, so style advice on them is noise.
 - Messages and fixes speak of context cost and of what readers can scan, never of adherence: `sota:#4 (A)` found no adherence change from file size (25 to 500 lines), position or splitting, and `sota:#12 (C)` found the effect of all-caps emphasis small or absent on current models.
 - A rule that scans prose reads it as `prose_segments` gives it: code blocks, HTML blocks and frontmatter are left out, and code spans are blanked.
 
@@ -48,3 +51,10 @@ The `advice` pack holds info-only style advice from Anthropic's docs. It runs by
 - `skill-time-sensitive-text` checks the doc's mechanical seed only: a time word (`before`, `after`, `until`, `since`, `as of`) followed by a month and year, a quarter and year, or a bare year not followed by a word (so "after 2000 ms" is a quantity, not a date). It reads SKILL.md prose; the judgement the doc calls for ("information that will become outdated") belongs to a deep check.
 - `agent-read-only-has-write-tools` reads the agents Claude Code loads on the repo and user layers. An agent sounds read-only when its name or description says review, audit, research, explore, read-only, analyze or inspect, and neither says it writes (implement, fix, write, edit, refactor, generate, create, update, apply, modify, change, patch, add, remove, delete, rename, migrate, commit). It fires when such an agent inherits every tool (no `tools` key, or `*`) or lists Write, Edit or NotebookEdit, unless `disallowedTools` takes them away. `Bash` and `PowerShell` do not count, though the doc's example names Bash: reviewers run `git diff` and tests, so counting them would flag nearly every reviewer. `MultiEdit` does not count either, since it is a permission name with no tool behind it.
 - SK18 (a skill with side effects that Claude can invoke) is not encoded: whether a skill has side effects is not decidable from its text, and a keyword heuristic over prose matched 25 of 38 skills on a real home. It is a candidate for a deep check.
+
+## Rules, memory and prompts
+
+- These rules are in `src/rigcheck/rules/advice_other.py`. `docs/research/sota.md` has no row for RL5, MM2 or PR10, so each cites its doc entry alone.
+- `rule-filename-generic` fires on a rule file whose name, lowercased and with a trailing counter removed (`rules2.md`, `general-1.md`), is `rules`, `rule`, `misc`, `miscellaneous`, `notes`, `general`, `other`, `stuff`, `untitled`, `new`, `temp` or `tmp`. The doc names rules, misc and notes; the rest are rigcheck's own. Words that can name a real topic (`common`, `guidelines`, `instructions`) are left out, and a longer name such as `misc-tools.md` is not generic. The doc's "one topic per file" half needs judgement and is not checked.
+- `memory-index-shape` checks the memory layer's MEMORY.md, the one exception to the pack's repo-and-user scope: the index loads every turn. A line offends when it holds no link to a local file; headings, fenced blocks and HTML comments are skipped, read from the same Markdown parse `memory-link-broken` uses. A broken link still counts as a link (that is `memory-link-broken`'s finding), a URL-only entry does not, and a linked line is an entry whether or not it is a bullet. A detail line under an entry has no link, so a multi-line entry offends. It reports once per index, at the first offending line, with the count. Merging or dropping stale entries needs judgement and is not checked.
+- `prompt-reasoning-extraction` reads the prose of skills, commands, agents, output styles, instruction and rule files, each skill's bundled `.md` files, and the memory index and topics, and fires on a line that asks the model to show, explain, narrate or write out its reasoning, thinking or thought process, to transcribe its thoughts, or to think out loud. "Think out loud" counts only as an instruction at the start of a clause, so a sentence about what users do is not reported. A negation (`don't`, `do not`, `never`, `not`, `without`, `avoid`, `no need to`) silences a phrase only in its own clause, so "Do not guess. Show your reasoning." still fires. Code spans, fenced blocks and frontmatter are not read. The doc gives warn on Fable and Mythos 5 models and later, but rigcheck does not read which model a setup uses, and advice rules are info, so it is info everywhere; the doc's judgement half is left to a deep check.
