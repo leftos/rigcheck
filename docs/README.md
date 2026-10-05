@@ -33,6 +33,9 @@ The user's product decisions; a change to one is the user's call.
 
   `core` and `advice` run by default.
 - **Deep check**: an opt-in check (`--deep`) that asks Claude, through headless `claude -p`, to judge what code cannot: contradictions, reworded duplicates, vague instructions.
+- **Deep check family**: one kind of deep check: a fixed prompt, a JSON schema for the answer and a prompt version; each family makes one `claude -p` call per file sent. See [rules/deep.md](rules/deep.md).
+- **Verdict**: one judgement a deep check family returns about one file (family, path, line, message); verdicts sit in `Rig.verdicts` before the rules run, and deep rules turn them into findings.
+- **Consent listing**: what `--deep` prints to stderr before any call: each file it would send with its byte count, the files held back and why, the model and the call count.
 - **Fix brief**: the Markdown file `rigcheck brief` writes for an agent to fix a set of findings: a `Setup` section, then one section per file, each finding a checkbox with its fix and evidence. rigcheck never edits the checked files itself.
 - **Covered**: a command is covered when a permission allow rule matches it, as Claude Code matches `Bash(...)` specifiers: each subcommand of a compound command on its own. `skill-injection-not-allowed` reports injected commands that nothing covers.
 - **Frontmatter retry**: Claude Code's second parse of a frontmatter block that strict YAML rejects: it re-quotes unquoted values holding `: ` or a YAML indicator and parses again; rigcheck reproduces it, so `data` is what Claude Code loads ([research/frontmatter-probe.md](research/frontmatter-probe.md)).

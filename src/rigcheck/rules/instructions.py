@@ -212,3 +212,16 @@ def internal_error(rig: Rig) -> Iterator[Finding]:
     """A rule raised an exception; the engine emits this finding in its place."""
     del rig
     yield from ()
+
+
+@rule(
+    "deep-error",
+    "core",
+    Severity.WARN,
+    "Re-run with --deep; if it fails again, run claude -p by hand to see the error. The file was not judged.",
+    ("rigcheck:deep",),
+)
+def deep_error(rig: Rig) -> Iterator[Finding]:
+    """A --deep check call failed or returned output that did not parse."""
+    del rig
+    yield from ()

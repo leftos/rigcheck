@@ -13,7 +13,7 @@ from rigcheck.model import DEFAULT_WINDOW, Kind, Layer, McpScope, Severity
 from rigcheck.rules import PACKS, REGISTRY
 from support import FIXTURES, Workspace, git_add, run_json, symlink_or_skip, write
 
-ENGINE_RULES = {"internal-error", "discovery-error"}
+ENGINE_RULES = {"internal-error", "discovery-error", "deep-error"}
 FIXTURE_RULES = sorted(set(REGISTRY) - ENGINE_RULES)
 
 

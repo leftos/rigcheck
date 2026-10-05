@@ -7,10 +7,10 @@ Status: early development. The instruction-file, `@import`, reference (stale pat
 ## Usage
 
 ```
-uv run rigcheck check [PATH] [--format text|json] [--home DIR] [--window SIZE] [--packs PACK[,PACK...]] [--only ID[,ID...]] [--fail-on error|warn|info] [--sibling DIR]...
+uv run rigcheck check [PATH] [--format text|json] [--home DIR] [--window SIZE] [--packs PACK[,PACK...]] [--only ID[,ID...]] [--fail-on error|warn|info] [--sibling DIR]... [--deep [--yes] [--dry-run]]
 uv run rigcheck rules [--format text|json]
 uv run rigcheck explain RULE_ID [--format text|json]
-uv run rigcheck brief [PATH] [-o FILE] [--home DIR] [--window SIZE] [--packs PACK[,PACK...]] [--only ID[,ID...]] [--sibling DIR]...
+uv run rigcheck brief [PATH] [-o FILE] [--home DIR] [--window SIZE] [--packs PACK[,PACK...]] [--only ID[,ID...]] [--sibling DIR]... [--deep [--yes] [--dry-run]]
 ```
 
 Checks the setup Claude Code loads for `PATH` (default: the current directory): the repo's instruction files and `.claude/` folder, your `~/.claude`, enabled plugins, and that project's own memory folder. `rigcheck check ~` checks only `~/.claude`, its plugins and its memory. Both reports open with a context budget: ≈tokens for each file loaded every turn, and the skill listing and agent descriptions against Claude Code's limits (1% of the context window, set with `--window`, default `200k`; 15,000 tokens). The budget itself never changes the exit status; a listing past its limit also raises a warn finding (`skill-listing-over-budget`, `agent-descriptions-over-budget`), so `--window` moves that finding too. The text report groups findings by layer, with findings about the whole setup (the two over-budget warnings) under their own `setup` heading first; `--format json` gives a stable schema for agents.
@@ -22,14 +22,16 @@ Every rule belongs to a pack:
 
 `--packs PACK[,PACK...]` picks the packs whose rules run (default `core,advice`; `house` runs only when named). Rules outside the selection do not run, except a rule named in `--only`, and the engine and suppression rules, which always run.
 
-`--only ID[,ID...]` reports only the findings of those rule ids (the other rules still run; an unknown id exits 2 and names the closest ids). `--fail-on error|warn|info` sets the lowest finding severity that makes the exit status 1 (default `error`). Exit status: 0 clean, 1 a finding at or above `--fail-on`, 2 a usage error. Repo docs (`docs/**/*.md` and `Docs/**/*.md`, without `plans/` or `archive/` folders) are discovered as kind `doc`. A line containing `<!-- rigcheck: allow reference-path-missing -->` silences that rule on the line and the next.
+`--only ID[,ID...]` reports only the findings of those rule ids (the other rules still run; an unknown id exits 2 and names the closest ids). `--fail-on error|warn|info` sets the lowest finding severity that makes the exit status 1 (default `error`). Exit status: 0 clean, 1 a finding at or above `--fail-on`, 2 a usage error or a `--deep` run not confirmed. Repo docs (`docs/**/*.md` and `Docs/**/*.md`, without `plans/` or `archive/` folders) are discovered as kind `doc`. A line containing `<!-- rigcheck: allow reference-path-missing -->` silences that rule on the line and the next.
 
 A `.rigcheck.toml` at the repo root silences findings the repo has judged not to apply. Each `[[suppress]]` entry names one `rule` id, an optional `path` glob relative to the repo root (for example `docs/**`), and a `reason`. A suppressed finding is left out of the findings and the exit status. The text report's last line adds `· N suppressed`, and `--format json` lists them under `suppressed` (each finding's fields plus `reason`) and counts them in `summary.suppressed`. `--only` filters them too.
 
 Some findings are never suppressed:
 - findings in `~/.claude`, plugins and memory, and in files outside the repo root;
-- `internal-error` and `discovery-error`;
+- `internal-error`, `discovery-error` and `deep-error`;
 - the two suppression rules themselves. An entry with no reason is `suppression-no-reason` (warn), and one that matches nothing is `suppression-unused` (info).
+
+`--deep` adds checks that ask Claude, through `claude -p` (the native executable, on PATH), to judge what code cannot. It sends only the instruction, rule, skill, command and agent files of the repo and of `~/.claude`. It never sends settings, hooks, MCP config, `~/.claude.json`, memory or plugin files, and it holds back any file that holds a secret, is empty, or is over 100,000 bytes. Before any call it prints the files it would send, with byte counts, the files held back, the model (`haiku`) and the call count to stderr, then asks for a yes. `--yes` skips the question but not the listing; without a terminal, `--deep` needs `--yes` or exits 2. `--dry-run` prints the listing and stops. Answers are cached under `$XDG_CACHE_HOME/rigcheck`, else `~/.cache/rigcheck`. A call that fails becomes a `deep-error` finding (warn). No deep check ships yet, so `--deep` currently lists the files and makes no call. Without `--deep`, rigcheck makes no network or model call.
 
 `rigcheck rules` lists every rule, one line each: id, pack, severity and summary, ordered by pack (`core`, `advice`, `house`) and then id. `--format json` gives a list of objects with `id`, `pack`, `severity`, `summary`, `fix` and `evidence`.
 

@@ -1,12 +1,14 @@
 import argparse
+import io
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
-from rigcheck import __version__, engine
+from rigcheck import __version__, deep, engine
 from rigcheck.cli import _RULE_DOCS, _rule_doc, _rules_to_run, main, parse_packs
-from rigcheck.model import Finding, Rig, Severity
+from rigcheck.model import Finding, Rig, Severity, Verdict
 from rigcheck.rules import DEFAULT_PACKS, PACKS, REGISTRY, rule
 from support import Workspace, write
 
@@ -291,3 +293,147 @@ def test_rule_doc_none_without_docs_folder(tmp_path: Path) -> None:
 def test_every_registered_rule_has_an_area_doc() -> None:
     missing = [rule_id for rule_id in REGISTRY if _rule_doc(rule_id, _RULE_DOCS) is None]
     assert missing == []
+
+
+def _no_runner() -> deep.Runner:
+    raise AssertionError("make_runner must not be called")
+
+
+def _uncalled_runner(prompt: str, schema: str) -> str:
+    raise AssertionError("the runner must not be called")
+
+
+def _fake_family() -> deep.Family:
+    def parse(path: Path, data: dict) -> tuple[Verdict, ...]:
+        return tuple(Verdict("fake", path, None, message) for message in data["messages"])
+
+    return deep.Family("fake", "1", '{"type": "object"}', lambda text: text, parse)
+
+
+def _envelope() -> str:
+    structured = {"messages": ["vague"]}
+    return json.dumps({"type": "result", "subtype": "success", "is_error": False, "structured_output": structured, "result": json.dumps(structured)})
+
+
+@pytest.fixture
+def isolated_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    cache = tmp_path / "xdg"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache))
+    return cache
+
+
+def test_run_without_deep_never_builds_a_runner(workspace: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(deep, "make_runner", _no_runner)
+    monkeypatch.setattr(deep, "FAMILIES", (_fake_family(),))
+    assert _check(workspace, _warn_rig(workspace), "--format", "json") == 0
+    assert capsys.readouterr().err == ""
+
+
+def test_deep_with_no_families_lists_and_makes_no_call(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(deep, "make_runner", _no_runner)
+    rig = _warn_rig(workspace)
+    assert _check(workspace, rig, "--format", "json") == 0
+    plain = json.loads(capsys.readouterr().out)
+    assert _check(workspace, rig, "--format", "json", "--deep") == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["findings"] == plain["findings"]
+    assert captured.err.splitlines() == ["  CLAUDE.md  21 bytes", "Model haiku, 0 call(s)."]
+
+
+def test_deep_yes_runs_fake_family(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], isolated_cache: Path
+) -> None:
+    calls: list[str] = []
+
+    def runner(prompt: str, schema: str) -> str:
+        calls.append(prompt)
+        return _envelope()
+
+    monkeypatch.setattr(deep, "FAMILIES", (_fake_family(),))
+    monkeypatch.setattr(deep, "make_runner", lambda: runner)
+    assert _check(workspace, _warn_rig(workspace), "--format", "json", "--deep", "--yes") == 0
+    captured = capsys.readouterr()
+    assert {finding["rule"] for finding in json.loads(captured.out)["findings"]} == {"reference-path-missing"}
+    assert "Model haiku, 1 call(s)." in captured.err
+    assert calls == ["Read `docs/gone.md`.\n"]
+    assert len(list((isolated_cache / "rigcheck").glob("*.json"))) == 1
+
+
+def test_deep_without_yes_and_no_tty_exits_2(workspace: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(deep, "FAMILIES", (_fake_family(),))
+    monkeypatch.setattr(deep, "make_runner", lambda: _uncalled_runner)
+    monkeypatch.setattr(sys, "stdin", io.StringIO("y\n"))
+    assert _check(workspace, _warn_rig(workspace), "--deep") == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--deep needs --yes when stdin is not a terminal" in captured.err
+
+
+def test_dry_run_prints_listing_and_calls_nothing(workspace: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(deep, "FAMILIES", (_fake_family(),))
+    monkeypatch.setattr(deep, "make_runner", _no_runner)
+    monkeypatch.setattr(deep.shutil, "which", lambda name: None)
+    assert _check(workspace, _warn_rig(workspace), "--deep", "--dry-run") == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.splitlines() == ["  CLAUDE.md  21 bytes", "Model haiku, 1 call(s)."]
+
+
+@pytest.mark.parametrize("flag", ["--yes", "--dry-run"])
+def test_yes_or_dry_run_without_deep_exits_2(workspace: Workspace, capsys: pytest.CaptureFixture[str], flag: str) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        _check(workspace, workspace.rig(), flag)
+    assert exit_info.value.code == 2
+    assert "--yes and --dry-run need --deep" in capsys.readouterr().err
+
+
+def test_deep_error_kept_under_only(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], isolated_cache: Path
+) -> None:
+    monkeypatch.setattr(deep, "FAMILIES", (_fake_family(),))
+    monkeypatch.setattr(deep, "make_runner", lambda: lambda prompt, schema: "not json")
+    _check(workspace, _warn_rig(workspace), "--format", "json", "--deep", "--yes", "--only", "reference-path-missing")
+    rules = [finding["rule"] for finding in json.loads(capsys.readouterr().out)["findings"]]
+    assert sorted(rules) == ["deep-error", "reference-path-missing"]
+    assert not isolated_cache.exists()
+
+
+def test_brief_accepts_deep(workspace: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(deep, "make_runner", _no_runner)
+    assert main(["brief", str(_warn_rig(workspace)), "--home", str(workspace.home), "--deep"]) == 0
+    captured = capsys.readouterr()
+    assert "reference-path-missing" in captured.out
+    assert captured.err.splitlines()[-1] == "Model haiku, 0 call(s)."
+
+
+class UnreadTty(io.StringIO):
+    """A terminal stdin that fails the test if anything reads it."""
+
+    def isatty(self) -> bool:
+        return True
+
+    def readline(self, size: int = -1) -> str:
+        raise AssertionError("the consent prompt must not read stdin")
+
+
+def test_missing_claude_exits_2_before_the_prompt(workspace: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(deep, "FAMILIES", (_fake_family(),))
+    monkeypatch.setattr(deep.shutil, "which", lambda name: None)
+    monkeypatch.setattr(sys, "stdin", UnreadTty())
+    with pytest.raises(SystemExit) as exit_info:
+        _check(workspace, _warn_rig(workspace), "--deep")
+    assert exit_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "--deep needs the claude CLI on PATH" in err
+    assert "[y/N]" not in err
+
+
+def test_missing_claude_exits_2(workspace: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(deep, "FAMILIES", (_fake_family(),))
+    monkeypatch.setattr(deep.shutil, "which", lambda name: None)
+    with pytest.raises(SystemExit) as exit_info:
+        _check(workspace, _warn_rig(workspace), "--deep", "--yes")
+    assert exit_info.value.code == 2
+    assert "--deep needs the claude CLI on PATH" in capsys.readouterr().err

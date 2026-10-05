@@ -3,11 +3,12 @@
 import argparse
 import difflib
 import json
+import os
 import re
 import sys
 from pathlib import Path
 
-from rigcheck import __version__, engine
+from rigcheck import __version__, deep, engine
 from rigcheck.discover import discover
 from rigcheck.model import DEFAULT_WINDOW, Finding, Outcome, Rig, Rule, Severity, Suppressed
 from rigcheck.report import brief, budget, terminal
@@ -21,6 +22,9 @@ _WINDOW = re.compile(r"([1-9][0-9]*)([km]?)", re.IGNORECASE)
 _WINDOW_MULTIPLIERS = {"": 1, "k": 1_000, "m": 1_000_000}
 
 _RULE_DOCS = Path(__file__).resolve().parents[2] / "docs" / "rules"
+
+_ALWAYS_KEPT = frozenset({"internal-error", "deep-error"})
+"""Rule ids ``--only`` never filters out: they report a rule or a ``--deep`` call that could not do its job."""
 
 
 def _run_flags() -> argparse.ArgumentParser:
@@ -47,6 +51,9 @@ def _run_flags() -> argparse.ArgumentParser:
         metavar="PACK[,PACK...]",
         help="packs whose rules run (default: core,advice; house is off unless named)",
     )
+    flags.add_argument("--deep", action="store_true", help="ask Claude to judge what code cannot; sends files after showing them")
+    flags.add_argument("--yes", action="store_true", help="skip the --deep confirmation prompt; the file listing is still printed")
+    flags.add_argument("--dry-run", action="store_true", help="with --deep, print what would be sent and stop")
     return flags
 
 
@@ -161,8 +168,8 @@ def _select(outcome: Outcome, only: frozenset[str] | None) -> tuple[list[Finding
     """Return the kept and suppressed findings of the ``--only`` rules, or all of them without ``--only``."""
     if only is None:
         return outcome.findings, outcome.suppressed
-    # A selected rule that raised is reported as internal-error, so that id is always kept.
-    findings = [finding for finding in outcome.findings if finding.rule_id in only or finding.rule_id == "internal-error"]
+    # A selected rule that raised is reported as internal-error, and a failed --deep call as deep-error, so those ids are always kept.
+    findings = [finding for finding in outcome.findings if finding.rule_id in only or finding.rule_id in _ALWAYS_KEPT]
     suppressed = [entry for entry in outcome.suppressed if entry.finding.rule_id in only]
     return findings, suppressed
 
@@ -186,10 +193,46 @@ def _analyze(parser: argparse.ArgumentParser, args: argparse.Namespace) -> tuple
         if not sibling.is_dir():
             parser.error(f"--sibling is not a directory: {sibling}")
     rig = discover(target, home, args.window, siblings=siblings)
+    deep_errors = _deep(parser, args, rig, home)
     rules = _rules_to_run(args.packs, args.only)
-    outcome = engine.apply_suppressions(rig, engine.run(rig, rules), _ran_ids(rules))
+    outcome = engine.apply_suppressions(rig, [*engine.run(rig, rules), *deep_errors], _ran_ids(rules))
     findings, suppressed = _select(outcome, args.only)
     return rig, findings, suppressed
+
+
+def _deep(parser: argparse.ArgumentParser, args: argparse.Namespace, rig: Rig, home: Path) -> list[Finding]:
+    """Under ``--deep``, list what would be sent, ask, run the families and fill ``rig.verdicts``.
+
+    Args:
+        parser: The subparser whose ``error`` reports a flag misuse or a missing ``claude``.
+        args: The parsed command-line arguments.
+        rig: The discovered setup; its ``verdicts`` are filled in place.
+        home: The resolved home directory, under which the cache lives unless ``XDG_CACHE_HOME`` is set.
+
+    Returns:
+        The ``deep-error`` findings of the calls that failed; empty without ``--deep``.
+
+    Raises:
+        deep.DeepStop: After a ``--dry-run`` listing (status 0), or when consent is not given (status 2).
+    """
+    if not args.deep:
+        if args.yes or args.dry_run:
+            parser.error("--yes and --dry-run need --deep")
+        return []
+    listing = deep.plan(rig, deep.FAMILIES)
+    sys.stderr.write(deep.format_listing(listing, rig))
+    if args.dry_run:
+        raise deep.DeepStop(0)
+    if not listing.calls:
+        return []
+    try:
+        runner = deep.make_runner()
+    except deep.DeepUnavailable as exc:
+        parser.error(str(exc))
+    deep.confirm(listing, yes=args.yes, stdin=sys.stdin, stderr=sys.stderr)
+    verdicts, errors = deep.run(rig, listing, runner, deep.cache_dir(os.environ, home), deep.FAMILIES)
+    rig.verdicts.update(verdicts)
+    return errors
 
 
 def _check(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
@@ -331,7 +374,10 @@ def main(argv: list[str] | None = None) -> int:
     if handler is None:
         parser.print_help(sys.stderr)
         return USAGE_ERROR
-    return handler(parser, args)
+    try:
+        return handler(parser, args)
+    except deep.DeepStop as stop:
+        return stop.exit_code
 
 
 if __name__ == "__main__":
