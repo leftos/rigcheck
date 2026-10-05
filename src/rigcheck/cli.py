@@ -13,7 +13,7 @@ from rigcheck.discover import discover
 from rigcheck.model import DEFAULT_WINDOW, Finding, Outcome, Rig, Rule, Severity, Suppressed
 from rigcheck.report import brief, budget, terminal
 from rigcheck.report import json as json_report
-from rigcheck.rules import DEFAULT_PACKS, PACKS, REGISTRY
+from rigcheck.rules import DEFAULT_PACKS, PACKS, REGISTRY, pack_list_text
 
 USAGE_ERROR = 2
 WINDOW_ERROR = "window must be a positive number of tokens, like 200k or 1m"
@@ -49,7 +49,7 @@ def _run_flags() -> argparse.ArgumentParser:
         type=parse_packs,
         default=DEFAULT_PACKS,
         metavar="PACK[,PACK...]",
-        help="packs whose rules run (default: core,advice; house is off unless named)",
+        help="rule packs to run, comma-separated (default: core,advice; house is off unless named; deep runs only with --deep)",
     )
     flags.add_argument("--deep", action="store_true", help="ask Claude to judge what code cannot; sends files after showing them")
     flags.add_argument("--yes", action="store_true", help="skip the --deep confirmation prompt; the file listing is still printed")
@@ -132,7 +132,7 @@ def parse_packs(value: str) -> frozenset[str]:
         raise argparse.ArgumentTypeError(f"empty pack name in {value!r}; give packs like core,advice")
     for name in names:
         if name not in PACKS:
-            raise argparse.ArgumentTypeError(f"unknown pack {name!r}; packs are core, advice and house")
+            raise argparse.ArgumentTypeError(f"unknown pack {name!r}; packs are {pack_list_text()}")
     return frozenset(names)
 
 
@@ -160,8 +160,23 @@ def _rules_to_run(packs: frozenset[str], only: frozenset[str] | None) -> list[Ru
 
 
 def _ran_ids(rules: list[Rule]) -> frozenset[str]:
-    """Return the ids of the rules that ran, the set ``apply_suppressions`` uses to tell a skipped rule's entry apart."""
-    return frozenset(rule.id for rule in rules)
+    """Return the ids of the rules that ran, the set ``apply_suppressions`` uses to tell a skipped rule's entry apart.
+
+    Deep rules never count as ran: a ``--deep`` run with no calls, held-back files or failed calls judged nothing, so
+    an entry for a deep rule that matched nothing is never reported unused.
+    """
+    return frozenset(rule.id for rule in rules if rule.pack != "deep")
+
+
+def _require_deep(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Reject deep rules asked for without ``--deep``: with no verdicts they could only find nothing."""
+    if args.deep:
+        return
+    if "deep" in args.packs:
+        parser.error("the deep pack needs --deep")
+    for rule_id in sorted(args.only or ()):
+        if REGISTRY[rule_id].pack == "deep":
+            parser.error(f"{rule_id} is a deep rule and needs --deep")
 
 
 def _select(outcome: Outcome, only: frozenset[str] | None) -> tuple[list[Finding], list[Suppressed]]:
@@ -192,9 +207,11 @@ def _analyze(parser: argparse.ArgumentParser, args: argparse.Namespace) -> tuple
     for sibling in siblings:
         if not sibling.is_dir():
             parser.error(f"--sibling is not a directory: {sibling}")
+    _require_deep(parser, args)
     rig = discover(target, home, args.window, siblings=siblings)
     deep_errors = _deep(parser, args, rig, home)
-    rules = _rules_to_run(args.packs, args.only)
+    packs = args.packs | {"deep"} if args.deep else args.packs
+    rules = _rules_to_run(packs, args.only)
     outcome = engine.apply_suppressions(rig, [*engine.run(rig, rules), *deep_errors], _ran_ids(rules))
     findings, suppressed = _select(outcome, args.only)
     return rig, findings, suppressed

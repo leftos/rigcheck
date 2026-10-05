@@ -2,14 +2,16 @@ import argparse
 import io
 import json
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from rigcheck import __version__, deep, engine
-from rigcheck.cli import _RULE_DOCS, _rule_doc, _rules_to_run, main, parse_packs
+from rigcheck.cli import _RULE_DOCS, _rule_doc, _rules_to_run, _run_flags, main, parse_packs
 from rigcheck.model import Finding, Rig, Severity, Verdict
 from rigcheck.rules import DEFAULT_PACKS, PACKS, REGISTRY, rule
+from rigcheck.rules.deep_common import findings_from
 from support import Workspace, write
 
 
@@ -198,6 +200,114 @@ def test_rules_to_run_always_includes_engine_rules() -> None:
     assert ids >= engine.UNSUPPRESSIBLE
 
 
+DEEP_RULE = "packs-deep-throwaway"
+
+
+def _register_deep_rule(calls: list[Rig]) -> str:
+    """Register a throwaway deep rule that records each rig it runs on and finds nothing; pop it in ``finally``."""
+
+    def check(rig: Rig) -> tuple[Finding, ...]:
+        """A throwaway deep check that yields no findings."""
+        calls.append(rig)
+        return ()
+
+    rule(DEEP_RULE, "deep", Severity.INFO, "Fix it.", ("rigcheck:deep",))(check)
+    return DEEP_RULE
+
+
+def test_deep_rule_not_selected_without_deep(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    calls: list[Rig] = []
+    rule_id = _register_deep_rule(calls)
+    try:
+        _check(workspace, _warn_rig(workspace), "--format", "json")
+    finally:
+        REGISTRY.pop(rule_id, None)
+    assert calls == []
+    capsys.readouterr()
+
+
+@pytest.mark.parametrize("flags", [("--deep",), ("--deep", "--packs", "core,deep")])
+def test_deep_rule_selected_with_deep(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], flags: tuple[str, ...]
+) -> None:
+    monkeypatch.setattr(deep, "make_runner", _no_runner)
+    calls: list[Rig] = []
+    rule_id = _register_deep_rule(calls)
+    try:
+        _check(workspace, _warn_rig(workspace), "--format", "json", *flags)
+    finally:
+        REGISTRY.pop(rule_id, None)
+    assert len(calls) == 1
+    assert "reference-path-missing" in [finding["rule"] for finding in json.loads(capsys.readouterr().out)["findings"]]
+
+
+def test_packs_deep_without_deep_exits_2(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        _check(workspace, workspace.rig(), "--packs", "core,deep")
+    assert exit_info.value.code == 2
+    assert "the deep pack needs --deep" in capsys.readouterr().err
+
+
+def test_only_deep_rule_without_deep_exits_2(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    rule_id = _register_deep_rule([])
+    try:
+        with pytest.raises(SystemExit) as exit_info:
+            _check(workspace, workspace.rig(), "--only", f"reference-path-missing,{rule_id}")
+    finally:
+        REGISTRY.pop(rule_id, None)
+    assert exit_info.value.code == 2
+    assert f"{rule_id} is a deep rule and needs --deep" in capsys.readouterr().err
+
+
+def test_packs_help_says_deep_needs_the_flag() -> None:
+    [packs] = [action for action in _run_flags()._actions if action.dest == "packs"]
+    assert packs.help == "rule packs to run, comma-separated (default: core,advice; house is off unless named; deep runs only with --deep)"
+
+
+def test_rules_lists_deep_rule_after_house(capsys: pytest.CaptureFixture[str]) -> None:
+    house_id = _register_house_rule()
+    deep_id = _register_deep_rule([])
+    try:
+        assert main(["rules"]) == 0
+        text_ids = [line.split()[0] for line in capsys.readouterr().out.splitlines()]
+        assert main(["rules", "--format", "json"]) == 0
+        json_ids = [entry["id"] for entry in json.loads(capsys.readouterr().out)]
+    finally:
+        REGISTRY.pop(house_id, None)
+        REGISTRY.pop(deep_id, None)
+    house_ids = {rule_id for rule_id, meta in REGISTRY.items() if meta.pack == "house"} | {house_id}
+    for ids in (text_ids, json_ids):
+        assert deep_id in ids
+        assert max(ids.index(rule_id) for rule_id in house_ids) < ids.index(deep_id)
+
+
+def test_explain_shows_deep_pack(capsys: pytest.CaptureFixture[str]) -> None:
+    rule_id = _register_deep_rule([])
+    try:
+        assert main(["explain", rule_id]) == 0
+    finally:
+        REGISTRY.pop(rule_id, None)
+    assert "pack      deep" in capsys.readouterr().out
+
+
+def test_deep_rule_suppression_never_reported_unused(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(deep, "make_runner", _no_runner)
+    rig = _warn_rig(workspace)
+    _suppress(rig, f'rule = "{DEEP_RULE}"\nreason = "judged elsewhere"\n')
+    rule_id = _register_deep_rule([])
+    try:
+        _check(workspace, rig, "--format", "json")
+        without_deep = [finding["rule"] for finding in json.loads(capsys.readouterr().out)["findings"]]
+        _check(workspace, rig, "--format", "json", "--deep")
+        with_deep = [finding["rule"] for finding in json.loads(capsys.readouterr().out)["findings"]]
+    finally:
+        REGISTRY.pop(rule_id, None)
+    assert "suppression-unused" not in without_deep
+    assert "suppression-unused" not in with_deep
+
+
 def test_packs_house_skips_core_rules_and_their_suppressions(workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     rig = _warn_rig(workspace)
     _suppress(rig, 'rule = "reference-path-missing"\nreason = "moved"\n')
@@ -359,6 +469,52 @@ def test_deep_yes_runs_fake_family(
     assert "Model haiku, 1 call(s)." in captured.err
     assert calls == ["Read `docs/gone.md`.\n"]
     assert len(list((isolated_cache / "rigcheck").glob("*.json"))) == 1
+
+
+def test_deep_rule_turns_verdicts_into_findings(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], isolated_cache: Path
+) -> None:
+    def check(rig: Rig) -> Iterator[Finding]:
+        """A throwaway deep check that reports the fake family's verdicts."""
+        return findings_from(rig, "fake", DEEP_RULE)
+
+    monkeypatch.setattr(deep, "FAMILIES", (_fake_family(),))
+    monkeypatch.setattr(deep, "make_runner", lambda: lambda prompt, schema: _envelope())
+    rig = _warn_rig(workspace)
+    rule(DEEP_RULE, "deep", Severity.WARN, "Fix it.", ("rigcheck:deep",))(check)
+    try:
+        _check(workspace, rig, "--format", "json", "--deep", "--yes")
+        findings = json.loads(capsys.readouterr().out)["findings"]
+        _check(workspace, rig, "--format", "json", "--deep", "--yes", "--only", "reference-path-missing")
+        filtered = json.loads(capsys.readouterr().out)["findings"]
+    finally:
+        REGISTRY.pop(DEEP_RULE, None)
+    [finding] = [entry for entry in findings if entry["rule"] == DEEP_RULE]
+    assert (finding["severity"], finding["message"], finding["line"]) == ("warn", "vague", None)
+    assert (finding["layer"], finding["load_class"]) == ("repo", "every-turn")
+    assert finding["path"].endswith("/CLAUDE.md")
+    assert [entry["rule"] for entry in filtered] == ["reference-path-missing"]
+
+
+def test_deep_finding_still_suppressed_under_deep(
+    workspace: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], isolated_cache: Path
+) -> None:
+    def check(rig: Rig) -> Iterator[Finding]:
+        """A throwaway deep check that reports the fake family's verdicts."""
+        return findings_from(rig, "fake", DEEP_RULE)
+
+    monkeypatch.setattr(deep, "FAMILIES", (_fake_family(),))
+    monkeypatch.setattr(deep, "make_runner", lambda: lambda prompt, schema: _envelope())
+    rig = _warn_rig(workspace)
+    _suppress(rig, f'rule = "{DEEP_RULE}"\nreason = "judged elsewhere"\n')
+    rule(DEEP_RULE, "deep", Severity.WARN, "Fix it.", ("rigcheck:deep",))(check)
+    try:
+        _check(workspace, rig, "--format", "json", "--deep", "--yes")
+    finally:
+        REGISTRY.pop(DEEP_RULE, None)
+    report = json.loads(capsys.readouterr().out)
+    assert [finding["rule"] for finding in report["findings"]] == ["reference-path-missing"]
+    assert [(entry["rule"], entry["reason"]) for entry in report["suppressed"]] == [(DEEP_RULE, "judged elsewhere")]
 
 
 def test_deep_without_yes_and_no_tty_exits_2(workspace: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

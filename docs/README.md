@@ -30,8 +30,11 @@ The user's product decisions; a change to one is the user's call.
   - `core` holds rules backed by official documentation or graded evidence.
   - `advice` holds info-only style advice that cites a doc together with the null result against it.
   - `house` holds opinionated conventions and is off unless named.
+  - `deep` holds the deep rules, which turn `--deep` verdicts into findings; it runs only with `--deep`, which always adds it.
 
   `core` and `advice` run by default.
+- **Deep rule**: a rule in the `deep` pack; it reads one deep check family's verdicts from the `Rig` and reports each as a finding on the file that was judged.
+- **Canned verdicts**: a deep rule's fixture file, `verdicts.json`, which the catalog test loads into `Rig.verdicts` in place of a `claude -p` call; see [rules/deep.md](rules/deep.md).
 - **Deep check**: an opt-in check (`--deep`) that asks Claude, through headless `claude -p`, to judge what code cannot: contradictions, reworded duplicates, vague instructions.
 - **Deep check family**: one kind of deep check: a fixed prompt, a JSON schema for the answer and a prompt version; each family makes one `claude -p` call per file sent. See [rules/deep.md](rules/deep.md).
 - **Verdict**: one judgement a deep check family returns about one file (family, path, line, message); verdicts sit in `Rig.verdicts` before the rules run, and deep rules turn them into findings.

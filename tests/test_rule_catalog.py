@@ -1,17 +1,21 @@
 """Every rule has evidence, a failing fixture and a passing fixture, and behaves on both."""
 
+import argparse
 import json
 import os
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from rigcheck.cli import main
 from rigcheck.discover import MAX_BYTES, discover, memory_dir
-from rigcheck.model import DEFAULT_WINDOW, Kind, Layer, McpScope, Severity
-from rigcheck.rules import PACKS, REGISTRY
-from support import FIXTURES, Workspace, git_add, run_json, symlink_or_skip, write
+from rigcheck.model import DEFAULT_WINDOW, Finding, Kind, Layer, McpScope, Rig, Severity, Verdict
+from rigcheck.rules import PACKS, REGISTRY, rule
+from rigcheck.rules.deep_common import deep_artifacts, findings_from
+from support import FIXTURES, Workspace, git_add, symlink_or_skip, write
 
 ENGINE_RULES = {"internal-error", "discovery-error", "deep-error"}
 FIXTURE_RULES = sorted(set(REGISTRY) - ENGINE_RULES)
@@ -83,7 +87,7 @@ def _prepare(rule_id: str, variant: str, workspace: Workspace) -> Path:
             break
     _resolve_home_placeholders(workspace)
     rig = workspace.home / "work" / variant
-    excluded = ["home", "memory"]
+    excluded = ["home", "memory", "verdicts.json"]
     shutil.copytree(fixture / variant, rig, ignore=lambda directory, _names: excluded if Path(directory) == fixture / variant else [])
     _resolve_claude_json_placeholders(workspace, rig)
     memory_source = fixture / variant / "memory"
@@ -96,6 +100,67 @@ def _prepare(rule_id: str, variant: str, workspace: Workspace) -> Path:
     if setup is not None:
         setup(rig)
     return rig
+
+
+DeepStandIn = Callable[[argparse.ArgumentParser, argparse.Namespace, Rig, Path], list[Finding]]
+
+
+def _canned_verdicts(source: Path) -> DeepStandIn:
+    """Return a stand-in for ``rigcheck.cli._deep`` that fills ``rig.verdicts`` from a fixture's ``verdicts.json``.
+
+    Each entry is ``{"family", "path", "line", "message"}``. A path starting with ``~/`` is relative to the fake home,
+    any other to the variant root; each must resolve to a file ``--deep`` would send, or the test fails. No family is called.
+    """
+    entries = json.loads(source.read_text(encoding="utf-8"))
+
+    def fill(parser: argparse.ArgumentParser, args: argparse.Namespace, rig: Rig, home: Path) -> list[Finding]:
+        sendable = deep_artifacts(rig)
+        grouped: dict[str, list[Verdict]] = {}
+        for entry in entries:
+            path = _verdict_path(rig, entry["path"])
+            if path not in sendable:
+                pytest.fail(f"verdicts.json names {path}, which --deep would not send")
+            grouped.setdefault(entry["family"], []).append(Verdict(entry["family"], path, entry["line"], entry["message"]))
+        rig.verdicts.update({family: tuple(verdicts) for family, verdicts in grouped.items()})
+        return []
+
+    return fill
+
+
+def _verdict_path(rig: Rig, text: str) -> Path:
+    """Resolve a ``verdicts.json`` path: ``~/`` against the rig's home, anything else against the variant root."""
+    if text.startswith("~/"):
+        return (rig.home / text[2:]).resolve()
+    return (rig.target / text).resolve()
+
+
+def _verdicts_problems() -> list[str]:
+    """Return every fixture variant that breaks the ``verdicts.json`` rule: deep rules need one, other rules must not have one."""
+    problems: list[str] = []
+    for rule_id, meta in sorted(REGISTRY.items()):
+        for variant in ("bad", "good"):
+            has_verdicts = (FIXTURES / rule_id / variant / "verdicts.json").is_file()
+            if meta.pack == "deep" and not has_verdicts:
+                problems.append(f"{rule_id}/{variant} has no verdicts.json, which a deep rule's fixture needs")
+            elif meta.pack != "deep" and has_verdicts:
+                problems.append(f"{rule_id}/{variant} holds verdicts.json, but {rule_id} is not a deep rule")
+    return problems
+
+
+def _run_variant(
+    rule_id: str, variant: str, workspace: Workspace, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> list[dict[str, Any]]:
+    """Prepare a fixture variant, check it as JSON and return its findings.
+
+    A deep rule's variant runs with ``--deep``, its ``verdicts.json`` standing in for the families' calls.
+    """
+    rig = _prepare(rule_id, variant, workspace)
+    flags: list[str] = []
+    if REGISTRY[rule_id].pack == "deep":
+        monkeypatch.setattr("rigcheck.cli._deep", _canned_verdicts(FIXTURES / rule_id / variant / "verdicts.json"))
+        flags.append("--deep")
+    main(["check", str(rig), "--home", str(workspace.home), "--format", "json", *flags])
+    return json.loads(capsys.readouterr().out)["findings"]
 
 
 def test_prepare_resolves_plugin_install_paths(workspace: Workspace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -125,6 +190,96 @@ def test_prepare_resolves_claude_json_placeholders(workspace: Workspace, tmp_pat
     assert servers[0].config == {"command": f"{workspace.home.as_posix()}/bin/server"}
 
 
+def test_catalog_loads_canned_verdicts(
+    workspace: Workspace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixtures = tmp_path / "catalog-fixtures"
+    skill = "~/.claude/skills/x/SKILL.md"
+    canned = {
+        "bad": [
+            {"family": "fake", "path": "CLAUDE.md", "line": 1, "message": "vague"},
+            {"family": "fake", "path": skill, "line": None, "message": "conflicting step"},
+        ],
+        "good": [],
+    }
+    write(fixtures / "demo-deep" / "home" / ".claude" / "skills" / "x" / "SKILL.md", "---\nname: x\ndescription: Does x.\n---\n\nDo x.\n")
+    for variant, verdicts in canned.items():
+        write(fixtures / "demo-deep" / variant / "CLAUDE.md", "# Project\n")
+        write(fixtures / "demo-deep" / variant / "verdicts.json", json.dumps(verdicts))
+    monkeypatch.setattr("test_rule_catalog.FIXTURES", fixtures)
+    rule_id = _register_demo_deep_rule()
+    try:
+        bad = _run_variant(rule_id, "bad", workspace, capsys, monkeypatch)
+        good = _run_variant(rule_id, "good", workspace, capsys, monkeypatch)
+    finally:
+        REGISTRY.pop(rule_id, None)
+    root = (workspace.home / "work" / "bad").resolve()
+    paths = [artifact.path for artifact in discover(root, workspace.home.resolve(), DEFAULT_WINDOW).artifacts]
+    assert root / "CLAUDE.md" in paths
+    assert all(path.name != "verdicts.json" for path in paths)
+    assert not (root / "verdicts.json").exists()
+    found = [(entry["path"], entry["line"], entry["message"], entry["layer"]) for entry in bad if entry["rule"] == rule_id]
+    assert sorted(found) == sorted(
+        [
+            ((root / "CLAUDE.md").as_posix(), 1, "vague", "repo"),
+            ((workspace.home.resolve() / ".claude" / "skills" / "x" / "SKILL.md").as_posix(), None, "conflicting step", "user"),
+        ]
+    )
+    assert "internal-error" not in [entry["rule"] for entry in bad]
+    assert [entry["rule"] for entry in good if entry["rule"] in {rule_id, "internal-error"}] == []
+
+
+def _register_demo_deep_rule() -> str:
+    """Register a throwaway deep rule reporting the fake family's verdicts; pop it in ``finally``."""
+
+    def check(rig: Rig) -> Iterator[Finding]:
+        """A throwaway deep check that reports the fake family's verdicts."""
+        return findings_from(rig, "fake", "demo-deep")
+
+    rule("demo-deep", "deep", Severity.WARN, "Fix it.", ("rigcheck:deep",))(check)
+    return "demo-deep"
+
+
+def test_canned_verdict_on_a_file_deep_would_not_send_fails(
+    workspace: Workspace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixtures = tmp_path / "catalog-fixtures"
+    write(fixtures / "demo-deep" / "bad" / "CLAUDE.md", "# Project\n")
+    write(fixtures / "demo-deep" / "bad" / ".claude" / "settings.json", "{}\n")
+    verdicts = [{"family": "fake", "path": ".claude/settings.json", "line": None, "message": "vague"}]
+    write(fixtures / "demo-deep" / "bad" / "verdicts.json", json.dumps(verdicts))
+    monkeypatch.setattr("test_rule_catalog.FIXTURES", fixtures)
+    rule_id = _register_demo_deep_rule()
+    try:
+        with pytest.raises(pytest.fail.Exception) as excinfo:
+            _run_variant(rule_id, "bad", workspace, capsys, monkeypatch)
+    finally:
+        REGISTRY.pop(rule_id, None)
+    settings = (workspace.home / "work" / "bad" / ".claude" / "settings.json").resolve()
+    assert str(excinfo.value) == f"verdicts.json names {settings}, which --deep would not send"
+
+
+def test_verdicts_check_flags_missing_and_stray_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fixtures = tmp_path / "catalog-fixtures"
+    write(fixtures / "demo-deep" / "bad" / "verdicts.json", "[]\n")
+    (fixtures / "demo-deep" / "good").mkdir(parents=True)
+    write(fixtures / "suppression-no-reason" / "bad" / "verdicts.json", "[]\n")
+    monkeypatch.setattr("test_rule_catalog.FIXTURES", fixtures)
+    rule_id = _register_demo_deep_rule()
+    try:
+        problems = _verdicts_problems()
+    finally:
+        REGISTRY.pop(rule_id, None)
+    assert problems == [
+        "demo-deep/good has no verdicts.json, which a deep rule's fixture needs",
+        "suppression-no-reason/bad holds verdicts.json, but suppression-no-reason is not a deep rule",
+    ]
+
+
+def test_deep_rule_fixtures_have_verdicts() -> None:
+    assert _verdicts_problems() == []
+
+
 @pytest.mark.parametrize("rule_id", sorted(REGISTRY))
 def test_rule_has_evidence_and_summary(rule_id: str) -> None:
     rule = REGISTRY[rule_id]
@@ -143,18 +298,14 @@ def test_rule_has_both_fixtures(rule_id: str) -> None:
 
 
 @pytest.mark.parametrize("rule_id", FIXTURE_RULES)
-def test_bad_fixture_triggers_rule(rule_id: str, workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
-    rig = _prepare(rule_id, "bad", workspace)
-    _, report = run_json(capsys, rig, workspace.home)
-    rules = [finding["rule"] for finding in report["findings"]]
+def test_bad_fixture_triggers_rule(rule_id: str, workspace: Workspace, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    rules = [finding["rule"] for finding in _run_variant(rule_id, "bad", workspace, capsys, monkeypatch)]
     assert rule_id in rules
     assert "internal-error" not in rules
 
 
 @pytest.mark.parametrize("rule_id", FIXTURE_RULES)
-def test_good_fixture_passes_rule(rule_id: str, workspace: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
-    rig = _prepare(rule_id, "good", workspace)
-    _, report = run_json(capsys, rig, workspace.home)
-    rules = [finding["rule"] for finding in report["findings"]]
+def test_good_fixture_passes_rule(rule_id: str, workspace: Workspace, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    rules = [finding["rule"] for finding in _run_variant(rule_id, "good", workspace, capsys, monkeypatch)]
     assert rule_id not in rules
     assert "internal-error" not in rules

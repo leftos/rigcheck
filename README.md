@@ -18,9 +18,10 @@ Checks the setup Claude Code loads for `PATH` (default: the current directory): 
 Every rule belongs to a pack:
 - `core`: defects backed by the docs or by graded evidence;
 - `advice`: info-only style advice that never fails a default run;
-- `house`: opinionated conventions.
+- `house`: opinionated conventions;
+- `deep`: checks that need Claude's judgement, run only with `--deep`.
 
-`--packs PACK[,PACK...]` picks the packs whose rules run (default `core,advice`; `house` runs only when named). Rules outside the selection do not run, except a rule named in `--only`, and the engine and suppression rules, which always run.
+`--packs PACK[,PACK...]` picks the packs whose rules run (default `core,advice`; `house` runs only when named; `--deep` always adds `deep`, and naming `deep`, or a deep rule in `--only`, without `--deep` exits 2). Rules outside the selection do not run, except a rule named in `--only`, and the engine and suppression rules, which always run.
 
 `--only ID[,ID...]` reports only the findings of those rule ids (the other rules still run; an unknown id exits 2 and names the closest ids). `--fail-on error|warn|info` sets the lowest finding severity that makes the exit status 1 (default `error`). Exit status: 0 clean, 1 a finding at or above `--fail-on`, 2 a usage error or a `--deep` run not confirmed. Repo docs (`docs/**/*.md` and `Docs/**/*.md`, without `plans/` or `archive/` folders) are discovered as kind `doc`. A line containing `<!-- rigcheck: allow reference-path-missing -->` silences that rule on the line and the next.
 
@@ -33,7 +34,7 @@ Some findings are never suppressed:
 
 `--deep` adds checks that ask Claude, through `claude -p` (the native executable, on PATH), to judge what code cannot. It sends only the instruction, rule, skill, command and agent files of the repo and of `~/.claude`. It never sends settings, hooks, MCP config, `~/.claude.json`, memory or plugin files, and it holds back any file that holds a secret, is empty, or is over 100,000 bytes. Before any call it prints the files it would send, with byte counts, the files held back, the model (`haiku`) and the call count to stderr, then asks for a yes. `--yes` skips the question but not the listing; without a terminal, `--deep` needs `--yes` or exits 2. `--dry-run` prints the listing and stops. Answers are cached under `$XDG_CACHE_HOME/rigcheck`, else `~/.cache/rigcheck`. A call that fails becomes a `deep-error` finding (warn). No deep check ships yet, so `--deep` currently lists the files and makes no call. Without `--deep`, rigcheck makes no network or model call.
 
-`rigcheck rules` lists every rule, one line each: id, pack, severity and summary, ordered by pack (`core`, `advice`, `house`) and then id. `--format json` gives a list of objects with `id`, `pack`, `severity`, `summary`, `fix` and `evidence`.
+`rigcheck rules` lists every rule, one line each: id, pack, severity and summary, ordered by pack (`core`, `advice`, `house`, `deep`) and then id. `--format json` gives a list of objects with `id`, `pack`, `severity`, `summary`, `fix` and `evidence`.
 
 `rigcheck explain RULE_ID` prints one rule's id, pack, severity, summary, fix and evidence, and the rule-area doc under `docs/rules/` that covers it when run from a checkout (an installed copy has no docs, so that line is left out). `--format json` gives the same fields as one object, with `docs` null when no doc is found. An unknown id exits 2 and names the closest ids. Evidence strings point into the research: `official:CM2` is entry CM2 of `docs/research/official.md`, `sota:#2 (A)` is row 2 of `docs/research/sota.md` with its evidence grade, and `rigcheck:<area>` is a probe or decision of rigcheck's own.
 
