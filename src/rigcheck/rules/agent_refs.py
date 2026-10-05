@@ -51,8 +51,15 @@ def _split(text: str) -> list[str]:
     return [entry for entry in entries if entry]
 
 
-def _entries(value: Any) -> list[str]:
-    """Return the entries of an agent's names value: each string, or each string item of a list, split into names."""
+def agent_list_entries(value: Any) -> list[str]:
+    """Return the entries of an agent's names value (``tools``, ``disallowedTools`` or ``skills``).
+
+    Args:
+        value: The frontmatter value.
+
+    Returns:
+        Each string, or each string item of a list, split into names; empty for any other value.
+    """
     if isinstance(value, str):
         texts = [value]
     elif isinstance(value, list):
@@ -67,13 +74,14 @@ def _hint(value: str, candidates: tuple[str, ...]) -> str:
     return f' (did you mean "{match}"?)' if match is not None else ""
 
 
-def _tool_name(entry: str) -> str:
+def tool_name(entry: str) -> str:
+    """Return the tool an entry names: the text before any parenthesized specifier, such as ``Bash`` for ``Bash(git *)``."""
     return entry.split("(", 1)[0].strip()
 
 
 def _resolves(entry: str) -> bool:
     """Say whether a tools entry names a tool: a built-in name or alias, an MCP id, or a lone ``*``."""
-    name = _tool_name(entry)
+    name = tool_name(entry)
     return entry == "*" or name in KNOWN_TOOLS or _MCP_TOOL.fullmatch(name) is not None
 
 
@@ -91,7 +99,7 @@ def _canonical(name: str) -> str:
 def agent_tools_unresolved(rig: Rig) -> Iterator[Finding]:
     """A subagent whose tools list names no tool at all, so it usually fails to launch."""
     for artifact, parsed, data in loaded_agents(rig):
-        entries = _entries(data.get("tools"))
+        entries = agent_list_entries(data.get("tools"))
         if entries and not any(_resolves(entry) for entry in entries):
             message = "no entry in tools resolves to a tool, so the agent usually fails to launch"
             yield emit("agent-tools-unresolved", artifact, message, parsed.key_lines.get("tools", 1))
@@ -99,12 +107,12 @@ def agent_tools_unresolved(rig: Rig) -> Iterator[Finding]:
 
 def _unknown_tools(entries: list[str]) -> list[str]:
     """Return each distinct entry that names no tool, with its hint; a case variant of a tool the list reaches is left out."""
-    reachable = {_canonical(_tool_name(entry)) for entry in entries if _resolves(entry)}
+    reachable = {_canonical(tool_name(entry)) for entry in entries if _resolves(entry)}
     unknown: list[str] = []
     for entry in dict.fromkeys(entries):
         if _resolves(entry):
             continue
-        name = _tool_name(entry)
+        name = tool_name(entry)
         match = case_match(name, KNOWN_TOOLS)
         if match is not None and _canonical(match) in reachable:
             continue
@@ -135,7 +143,7 @@ def agent_tool_unknown(rig: Rig) -> Iterator[Finding]:
     """Tools or disallowedTools entries that name no tool, so Claude Code ignores them."""
     for artifact, parsed, data in loaded_agents(rig):
         for key in _TOOL_KEYS:
-            unknown = _unknown_tools(_entries(data.get(key)))
+            unknown = _unknown_tools(agent_list_entries(data.get(key)))
             if unknown:
                 yield emit("agent-tool-unknown", artifact, _unknown_message(key, unknown), parsed.key_lines.get(key, 1))
 
@@ -150,9 +158,9 @@ def agent_tool_unknown(rig: Rig) -> Iterator[Finding]:
 def agent_disallowed_specifier(rig: Rig) -> Iterator[Finding]:
     """A disallowedTools entry with a specifier, which still removes the whole tool."""
     for artifact, parsed, data in loaded_agents(rig):
-        for entry in _entries(data.get("disallowedTools")):
+        for entry in agent_list_entries(data.get("disallowedTools")):
             if _SPECIFIER.fullmatch(entry):
-                message = f"disallowedTools entry {show(entry)} has a specifier, but it still removes the whole {_tool_name(entry)} tool"
+                message = f"disallowedTools entry {show(entry)} has a specifier, but it still removes the whole {tool_name(entry)} tool"
                 yield emit("agent-disallowed-specifier", artifact, message, parsed.key_lines.get("disallowedTools", 1))
 
 
@@ -215,7 +223,7 @@ class _SkillIndex:
 
 def _skill_entries(rig: Rig) -> Iterator[tuple[Artifact, Frontmatter, str]]:
     for artifact, parsed, data in loaded_agents(rig):
-        for entry in _entries(data.get("skills")):
+        for entry in agent_list_entries(data.get("skills")):
             yield artifact, parsed, entry
 
 
