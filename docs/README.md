@@ -53,6 +53,7 @@ The user's product decisions; a change to one is the user's call.
 - **Bundled file**: a file inside a skill's folder other than SKILL.md that Claude may be meant to read or run.
 - **AGENTS.md peer**: the repo's AGENTS.md beside a CLAUDE.md. Codex reads it; Claude Code reads it only through an `@AGENTS.md` import, so without one it is shadowed. Rules that compare instruction files include it either way.
 - **Near-duplicate**: two clauses in different files whose tokens overlap by at least 0.8 of the smaller clause, the larger at most twice the smaller; see [rules/duplication.md](rules/duplication.md).
+- **Shared file / local file**: a shared file is one of the repo's project files (tracked, or untracked and not ignored), so every clone and cloud session sees it; every other instruction file is local to one machine (`~/.claude/CLAUDE.md`, a CLAUDE.md above the repo, a gitignored `CLAUDE.local.md`). `duplicate-line` never compares one with the other; see [rules/duplication.md](rules/duplication.md).
 - **Null result**: a study that found no effect of what a piece of advice is about (file length, emphasis); an `advice` rule cites it so its finding is not read as a claim about adherence; see [rules/advice.md](rules/advice.md).
 - **Rule-area doc**: one file under `docs/rules/` per group of related rules, stating what each rule checks and the design it settles, with reasons; see [rules/README.md](rules/README.md).
 - **Suppression**: a per-repo config entry that silences a rule, globally or for a path; every suppression must carry a reason.
