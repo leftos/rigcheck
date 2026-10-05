@@ -8,25 +8,26 @@
 
 ## M5 to M7 CLI surface and packs
 
-- [ ] RIG-6 M5: suppressions, advice pack, explain, brief
+- [x] RIG-6 M5: suppressions, advice pack, explain, brief
   - [x] RIG-34 M5a: read .rigcheck.toml suppressions and the suppression rules
   - [x] RIG-35 M5b: apply suppressions in the engine and report them
   - [x] RIG-36 M5c: pack plumbing: advice and house packs, --packs
   - [x] RIG-37 M5d: advice rules for instruction files (CM1, CM4, CM8-12, PR4)
-  - [ ] RIG-38 M5e: advice rules for skills and agents (SK6, SK9, SK12-14, SK18, AG10)
-  - [ ] RIG-39 M5f: advice rules for rules, memory and prompts (RL5, MM2, PR10)
+  - [x] RIG-38 M5e: advice rules for skills and agents (SK6, SK9, SK12-14, SK18, AG10)
+  - [x] RIG-39 M5f: advice rules for rules, memory and prompts (RL5, MM2, PR10)
   - [x] RIG-40 M5g: explain and rules commands
   - [x] RIG-41 M5h: brief command (Markdown fix brief)
 
 ## M6 deep checks
 
 - [/] RIG-7 M6: --deep checks via claude -p
-  - [ ] RIG-44 M6a: deep runner, cache, --deep flag and consent listing
-  - [ ] RIG-45 M6b: deep pack and rule plumbing with canned verdicts
+  - [x] RIG-44 M6a: deep runner, cache, --deep flag and consent listing
+  - [x] RIG-45 M6b: deep pack and rule plumbing with canned verdicts
   - [ ] RIG-46 M6c: deep checks for vague directives and bare prohibitions (CM6, PR2)
   - [ ] RIG-47 M6d: deep checks for skills and agents (SK5, SK20, AG7)
   - [ ] RIG-48 M6e: deep checks across the loaded set (CM7, paraphrased duplicates)
   - [ ] RIG-49 M6f: human-read real --deep run and docs
+- [ ] RIG-51 Merge feat/deep-checks (#100)
 
 ## M7 house pack and skill
 
