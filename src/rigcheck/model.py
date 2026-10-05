@@ -161,6 +161,23 @@ class Outcome:
 
 
 @dataclass(frozen=True)
+class Verdict:
+    """One judgement a ``--deep`` check family returned for a file.
+
+    Attributes:
+        family: The id of the family that returned it.
+        path: The judged file.
+        line: The 1-based line the judgement points at, or None for the whole file.
+        message: The judgement, in the family's words.
+    """
+
+    family: str
+    path: Path
+    line: int | None
+    message: str
+
+
+@dataclass(frozen=True)
 class Rule:
     """A check with the metadata that explains and ranks its findings."""
 
@@ -225,6 +242,7 @@ class Rig:
         window: The model's context window, in tokens.
         siblings: Folders given with ``--sibling`` where a doc, skill, agent or command path may also exist.
         suppressions: The valid entries of the repo's ``.rigcheck.toml``, in file order; empty when the target is home.
+        verdicts: The ``--deep`` verdicts by family id, filled before the rules run; empty without ``--deep``.
     """
 
     target: Path
@@ -236,6 +254,7 @@ class Rig:
     window: int
     siblings: tuple[Path, ...] = ()
     suppressions: tuple[Suppression, ...] = ()
+    verdicts: dict[str, tuple[Verdict, ...]] = field(default_factory=dict, compare=False, repr=False)
     _texts: dict[Path, str] = field(default_factory=dict, init=False, repr=False, compare=False)
 
     def text(self, path: Path) -> str:

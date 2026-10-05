@@ -6,7 +6,7 @@ from rigcheck.model import Finding, Layer, LoadClass, Outcome, Rig, Rule, Severi
 from rigcheck.parse.globs import matches_path
 from rigcheck.rules import REGISTRY
 
-UNSUPPRESSIBLE = frozenset({"internal-error", "discovery-error", "suppression-no-reason", "suppression-unused"})
+UNSUPPRESSIBLE = frozenset({"internal-error", "discovery-error", "deep-error", "suppression-no-reason", "suppression-unused"})
 """Rule ids whose findings no ``.rigcheck.toml`` entry can silence."""
 
 
