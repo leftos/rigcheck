@@ -12,7 +12,7 @@ def _findings(workspace: Workspace, files: dict[str, str]) -> list[Finding]:
     for name, text in files.items():
         write(memory / name, text)
     findings = engine.run(discover(repo, workspace.home, DEFAULT_WINDOW), REGISTRY.values())
-    return [finding for finding in findings if finding.rule_id.startswith("memory-")]
+    return [finding for finding in findings if finding.rule_id.startswith("memory-") and REGISTRY[finding.rule_id].pack == "core"]
 
 
 def _topic(frontmatter: str) -> dict[str, str]:

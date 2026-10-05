@@ -642,6 +642,28 @@ def code_blocks(text: str, start_line: int) -> list[tuple[int, list[str]]]:
     return found
 
 
+_MARKUP = frozenset({"fence", "code_block", "heading_open"})
+
+
+def markup_lines(text: str) -> frozenset[int]:
+    """Return the lines of a Markdown file that hold a code block or a heading, parsed as :func:`find_references` parses it.
+
+    Block-level HTML comments are removed first, as :func:`find_references` does, so their lines hold no markup.
+
+    Args:
+        text: The file content.
+
+    Returns:
+        The 1-based line numbers of fenced and indented code blocks, fence lines included, and of ATX and setext
+        headings, underline included; nested ones count too.
+    """
+    lines: set[int] = set()
+    for token in _tokens(strip_html_comments(text)):
+        if token.type in _MARKUP and token.map is not None:
+            lines.update(range(token.map[0] + 1, token.map[1] + 1))
+    return frozenset(lines)
+
+
 def find_imports(text: str) -> list[Import]:
     """Find Claude Code ``@path`` imports outside code blocks and code spans.
 

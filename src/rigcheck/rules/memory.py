@@ -16,7 +16,16 @@ _TYPES = frozenset({"user", "feedback", "project", "reference"})
 _TYPE_KEYS = ("type", "metadata.type")
 
 
-def _memory(rig: Rig, kind: Kind) -> list[Artifact]:
+def memory_artifacts(rig: Rig, kind: Kind) -> list[Artifact]:
+    """Return the auto-memory folder's files of ``kind``.
+
+    Args:
+        rig: The discovered setup.
+        kind: ``Kind.MEMORY_INDEX`` or ``Kind.MEMORY_TOPIC``.
+
+    Returns:
+        The memory-layer artifacts of that kind, in rig order.
+    """
     return [a for a in rig.artifacts if a.layer is Layer.MEMORY and a.kind is kind]
 
 
@@ -38,8 +47,16 @@ def _resolve(rig: Rig, directory: Path, token: str) -> Path:
     return Path(os.path.normpath(directory / token))
 
 
-def _links(rig: Rig, index: Artifact) -> Iterator[tuple[Reference, Path]]:
-    """Yield each Markdown link in MEMORY.md that names a path, with the path it resolves to."""
+def index_links(rig: Rig, index: Artifact) -> Iterator[tuple[Reference, Path]]:
+    """Yield each Markdown link in MEMORY.md that names a path, with the path it resolves to.
+
+    Args:
+        rig: The discovered setup.
+        index: The MEMORY.md artifact.
+
+    Yields:
+        Each link reference, with the path it resolves to relative to the memory folder or ``~``, existing or not.
+    """
     for reference in find_references(rig.text(index.path)):
         token = reference_path(reference) if reference.source == "link" else None
         if token is not None:
@@ -55,7 +72,7 @@ def _links(rig: Rig, index: Artifact) -> Iterator[tuple[Reference, Path]]:
 )
 def memory_index_too_large(rig: Rig) -> Iterator[Finding]:
     """MEMORY.md is past the 200 lines or 25 KB Claude Code loads, so the entries past it are invisible."""
-    for index in _memory(rig, Kind.MEMORY_INDEX):
+    for index in memory_artifacts(rig, Kind.MEMORY_INDEX):
         lines = _line_count(rig.text(index.path))
         size = file_size(index.path)
         if lines > MEMORY_INDEX_LINES or size > MEMORY_INDEX_BYTES:
@@ -72,8 +89,8 @@ def memory_index_too_large(rig: Rig) -> Iterator[Finding]:
 )
 def memory_link_broken(rig: Rig) -> Iterator[Finding]:
     """A link in MEMORY.md points at no file."""
-    for index in _memory(rig, Kind.MEMORY_INDEX):
-        for reference, target in _links(rig, index):
+    for index in memory_artifacts(rig, Kind.MEMORY_INDEX):
+        for reference, target in index_links(rig, index):
             if not _exists(target):
                 yield emit("memory-link-broken", index, f"{reference.raw} does not exist", reference.line)
 
@@ -88,9 +105,9 @@ def memory_link_broken(rig: Rig) -> Iterator[Finding]:
 def memory_topic_orphan(rig: Rig) -> Iterator[Finding]:
     """A memory topic file is not linked from MEMORY.md, so Claude has no index entry to find it by."""
     linked: dict[str, set[str]] = {}
-    for index in _memory(rig, Kind.MEMORY_INDEX):
-        linked[path_key(index.path.parent)] = {path_key(target) for _, target in _links(rig, index)}
-    for topic in _memory(rig, Kind.MEMORY_TOPIC):
+    for index in memory_artifacts(rig, Kind.MEMORY_INDEX):
+        linked[path_key(index.path.parent)] = {path_key(target) for _, target in index_links(rig, index)}
+    for topic in memory_artifacts(rig, Kind.MEMORY_TOPIC):
         targets = linked.get(path_key(topic.path.parent))
         if targets is not None and path_key(topic.path) not in targets:
             yield emit("memory-topic-orphan", topic, f"{topic.path.name} is not linked from MEMORY.md", None)
@@ -131,6 +148,6 @@ def _type_messages(types: dict[str, str]) -> list[str]:
 )
 def memory_type_unknown(rig: Rig) -> Iterator[Finding]:
     """A memory file's ``type`` is not one of the documented kinds."""
-    for topic in _memory(rig, Kind.MEMORY_TOPIC):
+    for topic in memory_artifacts(rig, Kind.MEMORY_TOPIC):
         for message in _type_messages(_types(rig.text(topic.path))):
             yield emit("memory-type-unknown", topic, message, None)
