@@ -25,9 +25,9 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "hypothesis==6.168.2",
+    "hypothesis==6.168.3",
     "pytest==9.1.1",
-    "ruff==0.16.9",
+    "ruff==0.16.10",
     "ty==0.0.84",
     "types-jsonschema==4.26.0.20260518",
     "types-pyyaml==6.0.12.20260906",
