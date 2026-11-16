@@ -19,9 +19,9 @@ uv run rigcheck check [PATH] [--format text|json] [--home DIR] [--window SIZE] [
 prek install                                            # hooks: ruff, ty, actionlint, zizmor
 ```
 
-Run test suites, the smoke and hook-running commits through the gate, `pwsh tools/gate.ps1 -Log .tmp/<name>.log -TimeoutSeconds <n> -Slot light|heavy -- <command…>` (`tools/gate.ps1` is the user-level gate's launcher; on a machine without the gate it runs the command at below-normal priority and still writes the log). The slots and timeouts per command are in the nextup profile's "Agents and gates".
+Run test suites, the smoke and hook-running commits through the gate, `pwsh -NoProfile -File tools/gate.ps1 run --log .tmp/<name>.log --timeout <n> --slot light|heavy -- <command…>` (`tools/gate.ps1` hands every word to the installed gate; a machine without it runs the command directly, and installs the gate from `X:\dev\gate` with `pwsh tools/install.ps1`). The slots and timeouts per command are in the nextup profile's "Agents and gates".
 
-Before landing a discovery or rule change, once its review fixes are in, run the real-repo smoke: `pwsh tools/gate.ps1 -Log .tmp/smoke.log -TimeoutSeconds 700 -Slot light -- bash .claude/skills/rigcheck-nextup/smoke.sh` (counts only; fails on an `internal-error`).
+Before landing a discovery or rule change, once its review fixes are in, run the real-repo smoke: `pwsh -NoProfile -File tools/gate.ps1 run --log .tmp/smoke.log --timeout 700 --slot light -- bash .claude/skills/rigcheck-nextup/smoke.sh` (counts only; fails on an `internal-error`).
 
 ## Structure
 
