@@ -60,6 +60,7 @@ linear: rigcheck
 | A rule added, renamed or removed | the rule catalog in `docs/plans/v1.md` |
 | A CLI command, flag, exit code or JSON field | `README.md` usage section |
 | A term used in a project-specific sense (a pack, a load class, a layer) | `docs/README.md` Glossary |
+| A source file added, moved, removed or given a new responsibility under `src/rigcheck/` | `docs/ARCHITECTURE.md`: its Layers entry for that file's layer, and the Task Index rows that name the file |
 | A design ruling (a matcher boundary, a scope, a severity, a false-positive fix, a probe's result) | the rule-area doc in `docs/rules/` that owns the rule (a new area gets a new doc and a line in `docs/rules/README.md`), written as current behaviour with its reason, no dates |
 | An item finished | its issue **land**ed after the commit, once its rulings are in `docs/rules/` |
 
