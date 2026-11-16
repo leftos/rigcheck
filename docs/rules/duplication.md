@@ -23,7 +23,7 @@
 
 ## What is compared
 
-- **The unit is the clause, not the whole line.** A real duplicate is usually one sentence inside a long bullet. In `D:/yaat`, `AGENTS.md` lines 24, 25 and 88 restate one sentence of `CLAUDE.md:242`. A whole-line comparison scores that pair at 0.29 to 0.67 and misses it.
+- **The unit is the clause, not the whole line.** A real duplicate is usually one sentence inside a long bullet. In `X:/dev/yaat`, `AGENTS.md` lines 24, 25 and 88 restate one sentence of `CLAUDE.md:242`. A whole-line comparison scores that pair at 0.29 to 0.67 and misses it.
 - **Which lines are read:**
   - Only prose lines, from `prose_segments`, read from the first line after any frontmatter. Code blocks, fences and HTML blocks are skipped, since commands repeat across files legitimately.
   - Headings (`#` headings and underlined ones), table rows and lines that are only an `@path` import are skipped.
@@ -37,7 +37,7 @@
   - Exact when two clauses have equal tokens.
   - Near when the shared tokens are at least 0.8 of the smaller token set and the larger set is at most twice the smaller. The second condition stops a short clause from matching inside a long one.
   - Example: "never pass -q, -v q, --nologo or extra quieting flags to dotnet format" against "do not pass -v q, --nologo, or extra flags to dotnet format" shares 10 of 12 tokens, so it is near.
-- **Speed:** candidate pairs come from an inverted index of tokens, and a candidate whose token set is less than half or more than twice the size of the clause is skipped before counting. The rule runs in well under a second (0.07 s for `D:/yaat`'s 679 clauses).
+- **Speed:** candidate pairs come from an inverted index of tokens, and a candidate whose token set is less than half or more than twice the size of the clause is skipped before counting. The rule runs in well under a second (0.07 s for `X:/dev/yaat`'s 679 clauses).
 
 ## Where the finding sits
 

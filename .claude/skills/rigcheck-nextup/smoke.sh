@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run rigcheck against every git repo under D:/ with a commit in the last 30 days, plus $HOME,
+# Run rigcheck against every git repo under X:/dev/ with a commit in the last 30 days, plus $HOME,
 # from the current checkout (a worktree or main). Writes .tmp/smoke/<name>.json and prints
 # counts only: findings per rule summed over all targets, then each target's nonzero rules.
 # Usage: bash .claude/skills/rigcheck-nextup/smoke.sh [days]
@@ -9,7 +9,7 @@ out=.tmp/smoke
 mkdir -p "$out"
 since=$(date -d "-$days days" +%Y-%m-%d)
 targets=()
-for dir in /d/*/; do
+for dir in /x/dev/*/; do
   dir="${dir%/}"
   [ "$(basename "$dir")" = rigcheck ] && continue
   [ -e "$dir/.git" ] || continue
