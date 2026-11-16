@@ -15,7 +15,7 @@ from hypothesis import strategies as st
 
 from rigcheck import deep
 from rigcheck.discover import discover, memory_dir
-from rigcheck.model import DEFAULT_WINDOW, Rig, Verdict
+from rigcheck.model import DEFAULT_WINDOW, Artifact, Kind, Layer, LoadClass, Rig, Verdict
 from rigcheck.rules import REGISTRY
 from support import Workspace, write
 
@@ -24,11 +24,11 @@ SCHEMA = '{"type": "object"}'
 STRUCTURED = {"verdicts": [{"line": 3, "message": "vague"}]}
 
 
-def _parse(path: Path, data: dict) -> tuple[Verdict, ...]:
+def _parse(path: Path, text: str, data: dict) -> tuple[Verdict, ...]:
     return tuple(Verdict("fake", path, item.get("line"), item["message"]) for item in data["verdicts"])
 
 
-FAKE = deep.Family("fake", "1", SCHEMA, lambda text: "Judge this:\n" + text, _parse)
+FAKE = deep.Family("fake", "1", SCHEMA, lambda artifact: True, lambda text: "Judge this:\n" + text, _parse)
 
 
 def _envelope(structured: object, **overrides: object) -> str:
@@ -160,15 +160,158 @@ def test_file_over_the_byte_cap_is_not_sent(workspace: Workspace) -> None:
     assert listing.not_sent == ((repo / ".claude" / "rules" / "big.md", "over 100,000 bytes"),)
 
 
-def test_call_count_is_files_times_families(workspace: Workspace) -> None:
+def test_call_count_sums_accepted_files_per_family(workspace: Workspace) -> None:
     repo = workspace.rig()
     write(repo / "CLAUDE.md", "# Project\n")
     write(repo / ".claude" / "commands" / "go.md", "Go.\n")
     rig = _rig(workspace)
-    other = deep.Family("other", "1", SCHEMA, str, _parse)
+    other = deep.Family("other", "1", SCHEMA, lambda artifact: True, str, _parse)
     assert deep.plan(rig, (FAKE, other)).calls == 4
     assert deep.plan(rig, (FAKE,)).calls == 2
     assert deep.plan(rig, ()).calls == 0
+
+
+def _claude_md_only(artifact: Artifact) -> bool:
+    return artifact.path.name == "CLAUDE.md"
+
+
+def _two_file_rig(workspace: Workspace) -> Rig:
+    repo = workspace.rig()
+    write(repo / "CLAUDE.md", "# Project\n\nBe brief.\n")
+    write(repo / ".claude" / "commands" / "go.md", "Go.\n")
+    return _rig(workspace)
+
+
+def test_plan_counts_calls_per_accepting_family(workspace: Workspace) -> None:
+    rig = _two_file_rig(workspace)
+    only = deep.Family("only", "1", SCHEMA, _claude_md_only, FAKE.build_prompt, _parse)
+    every = deep.Family("every", "1", SCHEMA, lambda artifact: True, FAKE.build_prompt, _parse)
+    listing = deep.plan(rig, (only, every))
+    assert len(listing.sent) == 2
+    assert listing.calls == 3
+
+
+def test_run_sends_a_family_only_the_files_it_accepts(workspace: Workspace, tmp_path: Path) -> None:
+    rig = _two_file_rig(workspace)
+    only = deep.Family("only", "1", SCHEMA, _claude_md_only, FAKE.build_prompt, _parse)
+    runner = CountingRunner(_envelope(STRUCTURED))
+    _, errors = deep.run(rig, deep.plan(rig, (only,)), runner, tmp_path / "cache", (only,))
+    assert errors == []
+    assert len(runner.calls) == 1
+    assert "# Project\n\nBe brief.\n" in runner.calls[0][0]
+
+
+BAD_VAGUE = "# Project\n\nWrite clean code.\nRun `uv run pytest` before committing.\n"
+SPACED = "# Project\n\nWrite  clean\tcode.\n"
+CLAUDE_MD = Path("CLAUDE.md")
+
+
+@pytest.mark.parametrize("family", [deep.VAGUE_DIRECTIVE, deep.BARE_PROHIBITION], ids=lambda family: family.id)
+def test_family_prompt_numbers_every_line(family: deep.Family) -> None:
+    prompt = family.build_prompt(BAD_VAGUE)
+    assert "1\t# Project" in prompt
+    assert "3\tWrite clean code." in prompt
+    assert "<file>\n1\t# Project\n2\t\n3\tWrite clean code.\n4\tRun `uv run pytest` before committing.\n</file>\n" in prompt
+
+
+def _parse_one(family: deep.Family, item: dict) -> tuple[Verdict, ...]:
+    return family.parse(CLAUDE_MD, SPACED, {"verdicts": [item]})
+
+
+@pytest.mark.parametrize("family", [deep.VAGUE_DIRECTIVE, deep.BARE_PROHIBITION], ids=lambda family: family.id)
+def test_parse_keeps_a_quote_found_on_its_line(family: deep.Family) -> None:
+    verdicts = _parse_one(family, {"line": 3, "quote": "clean code", "why": "it names nothing."})
+    assert verdicts == (Verdict(family.id, CLAUDE_MD, 3, '"clean code": it names nothing.'),)
+
+
+@pytest.mark.parametrize("family", [deep.VAGUE_DIRECTIVE, deep.BARE_PROHIBITION], ids=lambda family: family.id)
+def test_parse_matches_across_collapsed_whitespace(family: deep.Family) -> None:
+    verdicts = _parse_one(family, {"line": 3, "quote": "Write clean code.", "why": "it names nothing."})
+    assert verdicts == (Verdict(family.id, CLAUDE_MD, 3, '"Write clean code.": it names nothing.'),)
+
+
+@pytest.mark.parametrize("family", [deep.VAGUE_DIRECTIVE, deep.BARE_PROHIBITION], ids=lambda family: family.id)
+def test_parse_drops_a_quote_not_on_its_line(family: deep.Family) -> None:
+    assert _parse_one(family, {"line": 1, "quote": "Write clean code.", "why": "it names nothing."}) == ()
+
+
+@pytest.mark.parametrize("family", [deep.VAGUE_DIRECTIVE, deep.BARE_PROHIBITION], ids=lambda family: family.id)
+@pytest.mark.parametrize("line", [0, 4])
+def test_parse_drops_a_line_outside_the_file(family: deep.Family, line: int) -> None:
+    assert _parse_one(family, {"line": line, "quote": "Write", "why": "it names nothing."}) == ()
+
+
+@pytest.mark.parametrize("family", [deep.VAGUE_DIRECTIVE, deep.BARE_PROHIBITION], ids=lambda family: family.id)
+def test_parse_drops_an_empty_quote(family: deep.Family) -> None:
+    assert _parse_one(family, {"line": 3, "quote": "   ", "why": "it names nothing."}) == ()
+
+
+@pytest.mark.parametrize("family", [deep.VAGUE_DIRECTIVE, deep.BARE_PROHIBITION], ids=lambda family: family.id)
+def test_parse_collapses_whitespace_in_the_quote(family: deep.Family) -> None:
+    verdicts = _parse_one(family, {"line": 3, "quote": "  Write \tclean  code.  ", "why": "it names nothing."})
+    assert verdicts == (Verdict(family.id, CLAUDE_MD, 3, '"  Write \tclean  code.  ": it names nothing.'),)
+
+
+_GOOD_ITEM = {"line": 3, "quote": "Write clean code.", "why": "it names nothing."}
+
+
+@pytest.mark.parametrize("family", [deep.VAGUE_DIRECTIVE, deep.BARE_PROHIBITION], ids=lambda family: family.id)
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"verdicts": ""},
+        {"verdicts": {}},
+        {"verdicts": ["Write clean code."]},
+        {"verdicts": [{**_GOOD_ITEM, "line": True}]},
+        {"verdicts": [{**_GOOD_ITEM, "line": "3"}]},
+        {"verdicts": [{**_GOOD_ITEM, "quote": 3}]},
+        {"verdicts": [{**_GOOD_ITEM, "why": None}]},
+        {"verdicts": [{**_GOOD_ITEM, "why": ["x"]}]},
+    ],
+    ids=["verdicts-str", "verdicts-dict", "item-str", "line-bool", "line-str", "quote-int", "why-none", "why-list"],
+)
+def test_parse_raises_on_wrong_types(family: deep.Family, data: dict) -> None:
+    with pytest.raises(TypeError):
+        family.parse(CLAUDE_MD, SPACED, data)
+
+
+def test_shipped_families_match_the_deep_rules() -> None:
+    family_ids = {family.id for family in deep.FAMILIES}
+    rule_ids = {rule_id for rule_id, meta in REGISTRY.items() if meta.pack == "deep" and rule_id != "deep-error"}
+    assert family_ids == rule_ids
+    assert {"vague-directive", "bare-prohibition"} <= family_ids
+
+
+def test_run_makes_the_calls_plan_counts(workspace: Workspace, tmp_path: Path) -> None:
+    rig = _two_file_rig(workspace)
+    only = deep.Family("only", "1", SCHEMA, _claude_md_only, FAKE.build_prompt, _parse)
+    every = deep.Family("every", "1", SCHEMA, lambda artifact: True, FAKE.build_prompt, _parse)
+    families = (only, every)
+    runner = CountingRunner(_envelope(STRUCTURED))
+    deep.run(rig, deep.plan(rig, families), runner, tmp_path / "cache", families)
+    assert len(runner.calls) == deep.plan(rig, families).calls == 3
+
+
+@pytest.mark.parametrize("family", [deep.VAGUE_DIRECTIVE, deep.BARE_PROHIBITION], ids=lambda family: family.id)
+def test_parse_raises_on_a_missing_key(family: deep.Family) -> None:
+    with pytest.raises(KeyError):
+        _parse_one(family, {"line": 3, "quote": "Write clean code."})
+
+
+@pytest.mark.parametrize("family", [deep.VAGUE_DIRECTIVE, deep.BARE_PROHIBITION], ids=lambda family: family.id)
+def test_families_accept_only_every_turn_instruction_and_rule_files(family: deep.Family) -> None:
+    accepted = [
+        Artifact(Path("CLAUDE.md"), Kind.INSTRUCTIONS, Layer.REPO, LoadClass.EVERY_TURN),
+        Artifact(Path(".claude/rules/x.md"), Kind.RULE, Layer.REPO, LoadClass.EVERY_TURN),
+    ]
+    refused = [
+        Artifact(Path(".claude/skills/demo/SKILL.md"), Kind.SKILL, Layer.REPO, LoadClass.EVERY_TURN),
+        Artifact(Path(".claude/agents/helper.md"), Kind.AGENT, Layer.REPO, LoadClass.EVERY_TURN),
+        Artifact(Path(".claude/rules/scoped.md"), Kind.RULE, Layer.REPO, LoadClass.ON_DEMAND),
+        Artifact(Path("sub/CLAUDE.md"), Kind.NESTED_INSTRUCTIONS, Layer.REPO, LoadClass.EVERY_TURN),
+    ]
+    assert [family.accepts(artifact) for artifact in accepted] == [True, True]
+    assert [family.accepts(artifact) for artifact in refused] == [False, False, False, False]
 
 
 def test_listing_shows_paths_bytes_model_and_calls_without_contents(workspace: Workspace) -> None:
@@ -201,9 +344,9 @@ def test_cache_key_changes_with_family_version_model_schema_and_text() -> None:
     base = deep.cache_key(FAKE, "haiku", "text")
     assert base == deep.cache_key(FAKE, "haiku", "text")
     variants = [
-        deep.cache_key(deep.Family("other", "1", SCHEMA, FAKE.build_prompt, _parse), "haiku", "text"),
-        deep.cache_key(deep.Family("fake", "2", SCHEMA, FAKE.build_prompt, _parse), "haiku", "text"),
-        deep.cache_key(deep.Family("fake", "1", '{"type": "array"}', FAKE.build_prompt, _parse), "haiku", "text"),
+        deep.cache_key(deep.Family("other", "1", SCHEMA, lambda artifact: True, FAKE.build_prompt, _parse), "haiku", "text"),
+        deep.cache_key(deep.Family("fake", "2", SCHEMA, lambda artifact: True, FAKE.build_prompt, _parse), "haiku", "text"),
+        deep.cache_key(deep.Family("fake", "1", '{"type": "array"}', lambda artifact: True, FAKE.build_prompt, _parse), "haiku", "text"),
         deep.cache_key(FAKE, "sonnet", "text"),
         deep.cache_key(FAKE, "haiku", "text!"),
     ]

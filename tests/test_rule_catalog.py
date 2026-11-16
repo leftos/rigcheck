@@ -264,6 +264,9 @@ def test_verdicts_check_flags_missing_and_stray_files(tmp_path: Path, monkeypatc
     write(fixtures / "demo-deep" / "bad" / "verdicts.json", "[]\n")
     (fixtures / "demo-deep" / "good").mkdir(parents=True)
     write(fixtures / "suppression-no-reason" / "bad" / "verdicts.json", "[]\n")
+    for deep_id in [rule_id for rule_id, meta in REGISTRY.items() if meta.pack == "deep"]:
+        for variant in ("bad", "good"):
+            write(fixtures / deep_id / variant / "verdicts.json", "[]\n")
     monkeypatch.setattr("test_rule_catalog.FIXTURES", fixtures)
     rule_id = _register_demo_deep_rule()
     try:

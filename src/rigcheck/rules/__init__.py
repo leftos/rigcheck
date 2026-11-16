@@ -85,6 +85,7 @@ import rigcheck.rules.agents  # noqa: E402 - imported for its registrations
 import rigcheck.rules.budget  # noqa: E402 - imported for its registrations
 import rigcheck.rules.commands  # noqa: E402 - imported for its registrations
 import rigcheck.rules.components  # noqa: E402 - imported for its registrations
+import rigcheck.rules.deep_instructions  # noqa: E402 - imported for its registrations
 import rigcheck.rules.duplication  # noqa: E402 - imported for its registrations
 import rigcheck.rules.hook_commands  # noqa: E402 - imported for its registrations
 import rigcheck.rules.hooks  # noqa: E402 - imported for its registrations

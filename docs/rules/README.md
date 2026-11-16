@@ -16,6 +16,6 @@ One doc per rule area: what the area checks, its rule ids with severity and evid
 - [`duplication.md`](duplication.md): instructions that two every-turn files, or an AGENTS.md peer, both state.
 - [`suppressions.md`](suppressions.md): the repo's `.rigcheck.toml` suppression entries, how they are read, and a suppression with no reason.
 - [`advice.md`](advice.md): the info-only `advice` pack: style advice from the docs, cited with the study rows that bear on it.
-- [`deep.md`](deep.md): `--deep`: which files are sent, the consent listing, the `claude -p` call, the answer cache, and `deep-error`.
+- [`deep.md`](deep.md): `--deep`: which files are sent, the consent listing, the `claude -p` call, the answer cache, `deep-error`, and the every-turn instruction checks `vague-directive` and `bare-prohibition`.
 
 `internal-error` belongs to the engine: a rule that raises becomes one `internal-error` finding and the other rules still run.
