@@ -1,0 +1,3 @@
+# Example tokens in rule docs, not files of this repo
+settings/.json
+deploy.sh
