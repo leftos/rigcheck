@@ -9,6 +9,7 @@ not sent. Answers are cached by family, prompt version, model, schema and file t
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -18,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
-from rigcheck.model import Artifact, Finding, Layer, Rig, Verdict
+from rigcheck.model import Artifact, Finding, Kind, Layer, LoadClass, Rig, Verdict
 from rigcheck.rules import REGISTRY
 from rigcheck.rules.deep_common import deep_artifacts
 
@@ -39,18 +40,114 @@ class Family:
         id: The family's id, the key of its verdicts in ``Rig.verdicts``.
         prompt_version: Bumped whenever the prompt or parse changes, so cached answers are not reused.
         schema: The JSON schema text passed to ``claude --json-schema``.
+        accepts: Says whether a file is sent to this family.
         build_prompt: Turns a file's text into the prompt.
-        parse: Turns the file's path and the unwrapped ``structured_output`` into verdicts; it may raise on bad output.
+        parse: Turns the file's path, its text and the unwrapped ``structured_output`` into verdicts; it may raise on
+            bad output.
     """
 
     id: str
     prompt_version: str
     schema: str
+    accepts: Callable[[Artifact], bool]
     build_prompt: Callable[[str], str]
-    parse: Callable[[Path, dict], tuple[Verdict, ...]]
+    parse: Callable[[Path, str, dict], tuple[Verdict, ...]]
 
 
-FAMILIES: tuple[Family, ...] = ()
+def _every_turn(artifact: Artifact) -> bool:
+    """Return whether ``artifact`` is an instruction or rule file that loads on every turn."""
+    return artifact.kind in (Kind.INSTRUCTIONS, Kind.RULE) and artifact.load_class is LoadClass.EVERY_TURN
+
+
+_QUOTED_SCHEMA = (
+    '{"type":"object","properties":{"verdicts":{"type":"array","items":{"type":"object","properties":'
+    '{"line":{"type":"integer","minimum":1},"quote":{"type":"string"},"why":{"type":"string"}},'
+    '"required":["line","quote","why"],"additionalProperties":false}}},"required":["verdicts"],"additionalProperties":false}'
+)
+"""The schema of both instruction families: a list of ``{line, quote, why}`` under ``verdicts``."""
+_WHITESPACE = re.compile(r"\s+")
+
+_VAGUE_PROMPT = (
+    "Below is one instruction file for a coding agent; each line starts with its line number and a tab. "
+    "List each directive that is too vague to check: it names no concrete action, command, path, value or output, "
+    'such as "write clean code", "format code properly" or "test your changes". '
+    'Directives such as "Use 2-space indentation" or "Run uv run pytest before committing" are fine. '
+    "Skip headings, rationale, examples and code blocks. For each, give the line number shown, the exact words of "
+    "the directive copied from that line, and one sentence on what is missing. Return an empty list when there is none."
+)
+_BARE_PROMPT = (
+    "Below is one instruction file for a coding agent; each line starts with its line number and a tab. "
+    "List each prohibition (never, do not, don't, must not, avoid) that gives no reason, neither on its line nor in "
+    "the sentence or bullet that follows. Skip prohibitions whose reason is plain from the same sentence and anything "
+    "inside a code block. For each, give the line number shown, the exact words of the prohibition copied from that "
+    "line, and one sentence saying the reason is missing. Return an empty list when there is none."
+)
+
+
+def _numbered_prompt(instructions: str, text: str) -> str:
+    """Return ``instructions`` followed by ``text`` inside ``<file>`` lines, each line prefixed with its number and a tab."""
+    numbered = "\n".join(f"{number}\t{line}" for number, line in enumerate(text.splitlines(), start=1))
+    return f"{instructions}\n\n<file>\n{numbered}\n</file>\n"
+
+
+def _collapsed(text: str) -> str:
+    """Return ``text`` with each run of whitespace made one space, stripped."""
+    return _WHITESPACE.sub(" ", text).strip()
+
+
+def _checked_item(item: object) -> tuple[int, str, str]:
+    """Return an answered item's ``line``, ``quote`` and ``why``; raise ``KeyError`` or ``TypeError`` on a wrong shape."""
+    if not isinstance(item, dict):
+        raise TypeError("an item is not an object")
+    line, quote, why = item["line"], item["quote"], item["why"]
+    if not isinstance(line, int) or isinstance(line, bool):
+        raise TypeError("line is not an integer")
+    if not isinstance(quote, str) or not isinstance(why, str):
+        raise TypeError("quote or why is not a string")
+    return line, quote, why
+
+
+def _quoted_verdicts(family_id: str, path: Path, text: str, data: dict) -> tuple[Verdict, ...]:
+    """Return a verdict per answered item whose quote is found on the line it names; drop every other item.
+
+    Raises:
+        KeyError: When an item lacks ``line``, ``quote`` or ``why``.
+        TypeError: When the answer has the wrong shape.
+    """
+    items = data["verdicts"]
+    if not isinstance(items, list):
+        raise TypeError("verdicts is not a list")
+    lines = text.splitlines()
+    kept: list[Verdict] = []
+    for item in items:
+        line, quote, why = _checked_item(item)
+        wanted = _collapsed(quote)
+        if 1 <= line <= len(lines) and wanted and wanted in _collapsed(lines[line - 1]):
+            kept.append(Verdict(family_id, path, line, f'"{quote}": {why}'))
+    return tuple(kept)
+
+
+VAGUE_DIRECTIVE = Family(
+    "vague-directive",
+    "1",
+    _QUOTED_SCHEMA,
+    _every_turn,
+    lambda text: _numbered_prompt(_VAGUE_PROMPT, text),
+    lambda path, text, data: _quoted_verdicts("vague-directive", path, text, data),
+)
+"""Finds every-turn directives that name no concrete action that can be checked."""
+
+BARE_PROHIBITION = Family(
+    "bare-prohibition",
+    "1",
+    _QUOTED_SCHEMA,
+    _every_turn,
+    lambda text: _numbered_prompt(_BARE_PROMPT, text),
+    lambda path, text, data: _quoted_verdicts("bare-prohibition", path, text, data),
+)
+"""Finds every-turn prohibitions that give no reason."""
+
+FAMILIES: tuple[Family, ...] = (VAGUE_DIRECTIVE, BARE_PROHIBITION)
 """The deep check families that run under ``--deep``."""
 
 
@@ -62,7 +159,7 @@ class Listing:
         sent: Each file to send with its size in UTF-8 bytes.
         not_sent: Each selected file held back, with the reason.
         model: The model the calls use.
-        calls: How many calls the run makes: files sent times families.
+        calls: How many calls the run makes: for each family, the files sent that it accepts.
     """
 
     sent: tuple[tuple[Path, int], ...]
@@ -97,16 +194,18 @@ def plan(rig: Rig, families: tuple[Family, ...]) -> Listing:
         The listing of files sent and not sent, the model and the call count.
     """
     secrets = _secret_paths(rig)
+    artifacts = deep_artifacts(rig)
     sent: list[tuple[Path, int]] = []
     not_sent: list[tuple[Path, str]] = []
-    for artifact in deep_artifacts(rig).values():
+    for artifact in artifacts.values():
         size = len(rig.text(artifact.path).encode("utf-8"))
         reason = _hold_back_reason(artifact.path, size, secrets)
         if reason is None:
             sent.append((artifact.path, size))
         else:
             not_sent.append((artifact.path, reason))
-    return Listing(tuple(sent), tuple(not_sent), MODEL, len(sent) * len(families))
+    calls = sum(1 for family in families for path, _ in sent if family.accepts(artifacts[path]))
+    return Listing(tuple(sent), tuple(not_sent), MODEL, calls)
 
 
 def _secret_paths(rig: Rig) -> frozenset[Path] | None:
@@ -236,7 +335,7 @@ def _judge(family: Family, path: Path, text: str, runner: Runner, cache: Path) -
             raise _BadOutputError(f"the call raised {type(exc).__name__}") from exc
         structured = _unwrap(stdout)
     try:
-        verdicts = family.parse(path, structured)
+        verdicts = family.parse(path, text, structured)
     except Exception as exc:
         raise _BadOutputError(f"parse raised {type(exc).__name__}") from exc
     if fresh:
@@ -247,7 +346,7 @@ def _judge(family: Family, path: Path, text: str, runner: Runner, cache: Path) -
 def run(
     rig: Rig, listing: Listing, runner: Runner, cache: Path, families: tuple[Family, ...]
 ) -> tuple[dict[str, tuple[Verdict, ...]], list[Finding]]:
-    """Run every family over every file the listing sends, one call at a time.
+    """Run every family over each file the listing sends that it accepts, one call at a time.
 
     A call that raises or returns output that does not unwrap or parse becomes one ``deep-error`` finding for that
     file and is not cached.
@@ -268,6 +367,8 @@ def run(
     for family in families:
         found: list[Verdict] = []
         for path, _ in listing.sent:
+            if not family.accepts(artifacts[path]):
+                continue
             try:
                 found.extend(_judge(family, path, rig.text(path), runner, cache))
             except _BadOutputError as exc:

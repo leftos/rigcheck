@@ -230,6 +230,7 @@ def test_deep_rule_not_selected_without_deep(workspace: Workspace, capsys: pytes
 def test_deep_rule_selected_with_deep(
     workspace: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], flags: tuple[str, ...]
 ) -> None:
+    monkeypatch.setattr(deep, "FAMILIES", ())
     monkeypatch.setattr(deep, "make_runner", _no_runner)
     calls: list[Rig] = []
     rule_id = _register_deep_rule(calls)
@@ -293,6 +294,7 @@ def test_explain_shows_deep_pack(capsys: pytest.CaptureFixture[str]) -> None:
 def test_deep_rule_suppression_never_reported_unused(
     workspace: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    monkeypatch.setattr(deep, "FAMILIES", ())
     monkeypatch.setattr(deep, "make_runner", _no_runner)
     rig = _warn_rig(workspace)
     _suppress(rig, f'rule = "{DEEP_RULE}"\nreason = "judged elsewhere"\n')
@@ -414,10 +416,10 @@ def _uncalled_runner(prompt: str, schema: str) -> str:
 
 
 def _fake_family() -> deep.Family:
-    def parse(path: Path, data: dict) -> tuple[Verdict, ...]:
+    def parse(path: Path, text: str, data: dict) -> tuple[Verdict, ...]:
         return tuple(Verdict("fake", path, None, message) for message in data["messages"])
 
-    return deep.Family("fake", "1", '{"type": "object"}', lambda text: text, parse)
+    return deep.Family("fake", "1", '{"type": "object"}', lambda artifact: True, lambda text: text, parse)
 
 
 def _envelope() -> str:
@@ -442,6 +444,7 @@ def test_run_without_deep_never_builds_a_runner(workspace: Workspace, monkeypatc
 def test_deep_with_no_families_lists_and_makes_no_call(
     workspace: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    monkeypatch.setattr(deep, "FAMILIES", ())
     monkeypatch.setattr(deep, "make_runner", _no_runner)
     rig = _warn_rig(workspace)
     assert _check(workspace, rig, "--format", "json") == 0
@@ -557,6 +560,7 @@ def test_deep_error_kept_under_only(
 
 
 def test_brief_accepts_deep(workspace: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(deep, "FAMILIES", ())
     monkeypatch.setattr(deep, "make_runner", _no_runner)
     assert main(["brief", str(_warn_rig(workspace)), "--home", str(workspace.home), "--deep"]) == 0
     captured = capsys.readouterr()

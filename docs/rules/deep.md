@@ -1,12 +1,14 @@
 # Deep checks
 
-`--deep` asks Claude, through headless `claude -p`, to judge what code cannot. The runner, the cache and the consent flow live in `src/rigcheck/deep.py`. Each deep check family (one fixed prompt and JSON schema) adds its judgements to `Rig.verdicts` before the rules run, so a deep rule stays a function of the `Rig` alone. No family ships yet, so `--deep` lists the files it would send and makes no call.
+`--deep` asks Claude, through headless `claude -p`, to judge what code cannot. The runner, the cache and the consent flow live in `src/rigcheck/deep.py`. Each deep check family (one fixed prompt and JSON schema) adds its judgements to `Rig.verdicts` before the rules run, so a deep rule stays a function of the `Rig` alone. The `vague-directive` and `bare-prohibition` families judge every-turn instruction and rule files.
 
 ## Rules
 
 | Rule id | Severity | Evidence |
 |---|---|---|
 | `deep-error` | warn | `rigcheck:deep` |
+| `vague-directive` | info | `official:CM6`, `sota:#13 (C)` |
+| `bare-prohibition` | info | `official:PR2`, `sota:#12 (C)` |
 
 ## What is sent
 
@@ -17,6 +19,7 @@
 - A file over 100,000 bytes (UTF-8, as sent) is not sent, so a stray dump cannot run up the bill.
 - A file held back for several reasons shows the first of: holds a secret, empty, over the cap.
 - A path that several artifacts share is sent once.
+- A family is sent only the files its `accepts` says it takes. `vague-directive` and `bare-prohibition` take instruction (`CLAUDE.md`, `AGENTS.md`) and rule files that load on every turn: a skill, command or agent file, or a file that loads on demand, is judged by neither. The consent listing still lists every file sent, and its call count is, for each family, the files sent that it accepts.
 
 ## Consent
 
@@ -28,7 +31,7 @@
 
 ## The call
 
-- Each call runs `claude -p --output-format json --json-schema <schema> --tools "" --no-session-persistence --safe-mode --model haiku --max-budget-usd 0.50 --system-prompt <fixed>` with the prompt on stdin, one call per family and file, in sequence, with a 120 s timeout. `--safe-mode` works with an OAuth login, so no API key is needed; `--tools ""` gives the model no tools and `--no-session-persistence` leaves no session behind. Defaults are model `haiku` and $0.50 per call (owner ruling).
+- Each call runs `claude -p --output-format json --json-schema <schema> --tools "" --no-session-persistence --safe-mode --model haiku --max-budget-usd 0.50 --system-prompt <fixed>` with the prompt on stdin, one call per family and each file that family accepts, in sequence, with a 120 s timeout. `--safe-mode` works with an OAuth login, so no API key is needed; `--tools ""` gives the model no tools and `--no-session-persistence` leaves no session behind. Defaults are model `haiku` and $0.50 per call (owner ruling).
 - `claude` must be the native executable. A `.cmd` or `.bat` shim (an npm install on Windows) is refused: it runs through `cmd.exe`, which can split the JSON schema argument, and a timeout would kill only the shell, leaving the call running.
 - The reply is one JSON object. rigcheck reads its `structured_output` and requires `is_error: false` and `subtype: "success"`.
 
@@ -36,6 +39,15 @@
 
 - Answers are cached under `$XDG_CACHE_HOME/rigcheck`, else `~/.cache/rigcheck`, on every platform, one `<sha256>.json` per answer, written atomically. The key hashes the family id, its prompt version, the model, the schema, the system prompt and the file text, so editing a prompt or a schema never serves a stale answer.
 - Only an answer that parses is cached, so a failed call is retried on the next run. An unreadable cache entry counts as a miss. A cache write that fails prints one stderr line and the run goes on: the answer was paid for and is still used. Each write goes through a temp file named for its process, so two runs never collide.
+
+## `vague-directive` and `bare-prohibition`
+
+- Both are info. `vague-directive` could be warn (CM6 suggests it), but a specificity check is only "defensible as info-level" (`docs/research/sota.md` §1.8) and must not score files (sota §6 folklore). `bare-prohibition` is info as its entry (PR2) suggests.
+- Neither rule's text speaks of emphasis or adherence: `emphasis-dense` owns emphasis, and sota #12 finds that emphasis does not change accuracy.
+- One call per family per accepted file. The prompt carries the file with each line numbered, and the model answers a list of `{line, quote, why}`.
+- A verdict is kept only when its quote is found on the line it names (whitespace runs collapsed, so wrapping and indentation do not matter). An item whose line is outside the file, or whose quote is empty or not on that line, is dropped: a model can hallucinate or misplace a quote, and such a finding would point the user at text that does not say it. An answer of the wrong shape (a missing key, a non-integer line) is a `deep-error`, not a dropped item.
+- The finding message is `"<quote>": <why>`, reported at that line of the file as read, so front matter counts toward the line number.
+- A family's prompt, schema and `parse` live in `deep.py`, not in the rules module, because a rules module importing `deep` would be circular; `rules/deep_instructions.py` holds only the rule metadata and calls `findings_from`.
 
 ## `deep-error`
 

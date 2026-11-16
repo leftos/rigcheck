@@ -36,7 +36,7 @@ The user's product decisions; a change to one is the user's call.
 - **Deep rule**: a rule in the `deep` pack; it reads one deep check family's verdicts from the `Rig` and reports each as a finding on the file that was judged.
 - **Canned verdicts**: a deep rule's fixture file, `verdicts.json`, which the catalog test loads into `Rig.verdicts` in place of a `claude -p` call; see [rules/deep.md](rules/deep.md).
 - **Deep check**: an opt-in check (`--deep`) that asks Claude, through headless `claude -p`, to judge what code cannot: contradictions, reworded duplicates, vague instructions.
-- **Deep check family**: one kind of deep check: a fixed prompt, a JSON schema for the answer and a prompt version; each family makes one `claude -p` call per file sent. See [rules/deep.md](rules/deep.md).
+- **Deep check family**: one kind of deep check: a fixed prompt, a JSON schema for the answer and a prompt version; each family makes one `claude -p` call per file sent that it accepts. See [rules/deep.md](rules/deep.md).
 - **Verdict**: one judgement a deep check family returns about one file (family, path, line, message); verdicts sit in `Rig.verdicts` before the rules run, and deep rules turn them into findings.
 - **Consent listing**: what `--deep` prints to stderr before any call: each file it would send with its byte count, the files held back and why, the model and the call count.
 - **Fix brief**: the Markdown file `rigcheck brief` writes for an agent to fix a set of findings: a `Setup` section, then one section per file, each finding a checkbox with its fix and evidence. rigcheck never edits the checked files itself.
