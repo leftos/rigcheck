@@ -42,7 +42,13 @@ Hooks are checked in two parts: their structure (event names, handler shape, mat
 - The command rules read command handlers with a non-empty `command` string. A handler with an `args` list is exec form; with `args` present but not a list it is skipped.
 - Findings sit on the handler's own command line: the command is found as a whole JSON string after its event's key (so the same command under two events points at each), or by its first line after the frontmatter `hooks` key; failing that, the event key's line.
 - Shell text is read lexically with POSIX grammar: split into segments on `&&`, `||`, `;` and `|` outside quotes, cut at a `#` that starts a word, and split into words. The shell helpers are shared with the reference and skill-body rules.
-- The script word of a segment is the command word (after leading `NAME=` assignments), or, when the program is an interpreter (`bash`, `sh`, `zsh`, `dash`, `python`, `python3`, `py`, `node`, `deno`, `bun`, `ruby`, `perl`, `pwsh`, `powershell`), its first operand, skipping flags and the values of value-taking flags (`node -r`, `python -W`, `ruby -I` and the like). `deno` and `bun` skip a `run` subcommand; PowerShell takes the word after `-File` or `-f`. An inline-code flag (`-c`, a shell's `-lc`-style group, `-e`, `-Command` and the like) or `python -m` means there is no script. `uv run` and `uvx` skip to their first non-flag word and read it again as a command. Reading stops at the first `cd`, `pushd`, `Set-Location` or `sl`, because later paths are relative to a folder rigcheck cannot follow.
+- The script word of a segment is the command word (after leading `NAME=` assignments), or, when the program is an interpreter (`bash`, `sh`, `zsh`, `dash`, `python`, `python3`, `py`, `node`, `deno`, `bun`, `ruby`, `perl`, `pwsh`, `powershell`), its first operand, skipping flags and the values of value-taking flags (`node -r`, `python -W`, `ruby -I` and the like).
+
+  A POSIX shell's short-flag group takes one value word for each `o` or `O` in it, so `bash -euo pipefail x.sh` and `bash -O extglob x.sh` run `x.sh`: each `o` names a `set -o` option and each `O` a `shopt` option.
+
+  `deno` and `bun` skip a `run` subcommand; PowerShell takes the word after `-File` or `-f`. An inline-code flag (`-c`, a shell's `-lc`-style group, `-e`, `-Command` and the like) or `python -m` means there is no script.
+
+  `uv run` and `uvx` skip their options and the values of value-taking ones (`--with`, `--from`, `--project`, `-p` and the like, as `uv run --help` and `uvx --help` list them) and read the first remaining word again as a command. Reading stops at the first `cd`, `pushd`, `Set-Location` or `sl`, because later paths are relative to a folder rigcheck cannot follow.
 - In exec form, the command and its `args` are read as one command's words.
 
 ## Script paths
