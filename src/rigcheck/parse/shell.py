@@ -32,6 +32,9 @@ _INTERPRETERS = frozenset({"bash", "sh", "zsh", "dash", "python", "python3", "py
 _SHELL_GROUP = re.compile(r"^-[A-Za-z]*c$")
 """A short-flag group ending in ``c``, such as ``-lc`` or ``-euc``: a POSIX shell's inline-command flag."""
 
+_SHELL_GROUP_WORD = re.compile(r"^[-+][A-Za-z]+$")
+"""A short-flag group, such as ``-euo`` or ``+o``: each ``o`` or ``O`` in it takes its own value word."""
+
 
 @dataclass(frozen=True)
 class _Flags:
@@ -72,6 +75,69 @@ _POWERSHELL_FILE = frozenset({"-file", "-f"})
 _POWERSHELL_FLAGS = _Flags(frozenset({"-command", "-c", "-encodedcommand", "-ec", "-e"}))
 """PowerShell's flags, compared lower-cased."""
 _NO_FLAGS = _Flags()
+_UV_FLAGS = _Flags(
+    valued=frozenset(
+        {
+            "--allow-insecure-host",
+            "--build-constraints",
+            "--cache-dir",
+            "--color",
+            "--config-file",
+            "--config-setting",
+            "--config-settings-package",
+            "--constraints",
+            "--default-index",
+            "--directory",
+            "--env-file",
+            "--exclude-newer",
+            "--exclude-newer-package",
+            "--extra",
+            "--extra-index-url",
+            "--find-links",
+            "--fork-strategy",
+            "--from",
+            "--group",
+            "--index",
+            "--index-strategy",
+            "--index-url",
+            "--keyring-provider",
+            "--link-mode",
+            "--no-binary-package",
+            "--no-build-isolation-package",
+            "--no-build-package",
+            "--no-editable-package",
+            "--no-extra",
+            "--no-group",
+            "--no-sources-package",
+            "--only-group",
+            "--overrides",
+            "--package",
+            "--prerelease",
+            "--prerelease-package",
+            "--project",
+            "--python",
+            "--python-platform",
+            "--refresh-package",
+            "--reinstall-package",
+            "--resolution",
+            "--torch-backend",
+            "--upgrade-group",
+            "--upgrade-package",
+            "--with",
+            "--with-editable",
+            "--with-requirements",
+            "-C",
+            "-P",
+            "-b",
+            "-c",
+            "-f",
+            "-i",
+            "-p",
+            "-w",
+        }
+    )
+)
+"""The value-taking options of ``uv run`` and ``uvx`` (``uv 0.12.18``), so an option's value is never read as the command."""
 
 _SUBCOMMAND_RUNNERS = frozenset({"deno", "bun"})
 """Interpreters that take a ``run`` subcommand before the script."""
@@ -225,6 +291,26 @@ def program_name(word: str) -> str:
     return re.split(r"[\\/]", word)[-1].lower().removesuffix(".exe")
 
 
+def _skipped(word: str, flags: _Flags) -> int:
+    """Return how many words ``word`` occupies, itself included: its value words follow it.
+
+    Two for a valued flag; for a POSIX shell's short-flag group, one plus one value word per ``o`` or ``O`` letter,
+    since each names a ``set -o`` or ``shopt`` option; one for any other flag; zero for a word that is no flag.
+
+    Args:
+        word: A command word.
+        flags: The interpreter's flag table.
+
+    Returns:
+        The number of words the flag consumes, or 0 when the word is no flag.
+    """
+    if word in flags.valued:
+        return 2
+    if flags.grouped and _SHELL_GROUP_WORD.match(word) is not None:
+        return 1 + sum(1 for letter in word if letter in "oO")
+    return 1 if word.startswith("-") else 0
+
+
 def _operand(parts: list[str], start: int, flags: _Flags) -> int | None:
     """Return the index of the first word from ``start`` that is neither a flag nor a flag's value.
 
@@ -235,9 +321,10 @@ def _operand(parts: list[str], start: int, flags: _Flags) -> int | None:
         word = parts[index]
         if flags.ends_search(word):
             return None
-        if not word.startswith("-"):
+        width = _skipped(word, flags)
+        if width == 0:
             return index
-        index += 2 if word in flags.valued else 1
+        index += width
     return None
 
 
@@ -285,7 +372,7 @@ def runs_inline(parts: list[str]) -> bool:
 
 
 def _uv_rest(parts: list[str]) -> list[str] | None:
-    """Return the command ``uv run`` or ``uvx`` runs, from its first non-flag word, or None when the line is neither."""
+    """Return the command ``uv run`` or ``uvx`` runs, skipping its options and their values; None when the line is neither."""
     program = program_name(parts[0])
     if program == "uvx":
         start = 1
@@ -293,7 +380,7 @@ def _uv_rest(parts: list[str]) -> list[str] | None:
         start = 2
     else:
         return None
-    index = _operand(parts, start, _NO_FLAGS)
+    index = _operand(parts, start, _UV_FLAGS)
     return parts[index:] if index is not None else []
 
 
@@ -306,8 +393,8 @@ def script_of(parts: list[str]) -> tuple[str, bool] | None:
     skip a ``run`` subcommand; ``pwsh`` and ``powershell`` take the word after ``-File`` or ``-f``. An inline-code
     flag (``-c``, a shell's ``-lc`` group, ``-e``, ``-Command`` and the like) or ``python -m`` before that word
     means there is no script.
-    ``uv run`` and ``uvx`` skip to their first non-flag word, which is read again as a command. Any other command
-    word is the script itself, run directly.
+    ``uv run`` and ``uvx`` skip their options and the values those options take, and the first remaining word is read
+    again as a command. Any other command word is the script itself, run directly.
 
     Args:
         parts: The command's words, as :func:`words` returns them.
